@@ -1,79 +1,81 @@
 # DCC — Interactive Desktop Roadmap
-#
-# 2026-08-18 현황: Phase 0~3 완료 + Phase 4 일부(팔레트 v1, 관리자/ETW).
-# 완료: 입력 파이프라인·토스트/저널·런처·클립보드·다운로드 감시·GPU(nvml)·
-#   날씨/티커/뉴스(Geek News)/ICS·git 수집기+잔디·claude 수집기+세션 보드·
-#   4존 레이아웃·전각 렌더링·멀티메트릭 스파이크·USE 패널(run queue/hard
-#   faults/net err/latency)·us,sy,dpc,intr·sys io·ETW 프로세스별 net·
-#   TODO.md 토글·Ctrl+` 팔레트(Everything/런처/+todo)·OLED(픽셀시프트/야간
-#   감광)·soft 테마·관리자 스케줄러.
-# 남음: 드롭존+구글드라이브, 캘린더/드라이브 OAuth(일정 추가), 이벤트 로그
-#   구독(EvtSubscribe 큐레이션), 디스크별 큐(sar -d), load average 합성.
 
 목표: 모니터링 벽지를 넘어, 아이콘·위젯·런처를 대체하는 **종합 인터랙티브 데스크톱 레이어**.
 
-원칙
-- 평소엔 포커스를 절대 뺏지 않는다. 키보드 입력은 팔레트 모드(전역 단축키로 진입) 한 지점에만 존재한다.
-- 모든 사건(커밋·다운로드·크래시·타이머 종료·업로드 완료)은 토스트 하나로 흐르고, 저널에 쌓인다.
-- 네트워크는 전용 워커 스레드에서만. 실패는 조용히 패널에 "offline"으로 표시하고 절대 렌더 루프를 막지 않는다.
-- 설정은 `dcc.toml` 하나 (런처 타일, RSS 주소, 티커 심볼, ICS 주소, 감시 폴더, 테마).
+범례: `[x]` 완료 · `[~]` 부분 완료/설정 필요 · `[ ]` 미착수
+(2026-08-18 기준. 설정 파일은 dcc.toml 대신 `dcc.conf` 라인 포맷으로 구현됨)
 
----
+## Phase 0 — 기반 공사 ✅
 
-## Phase 0 — 기반 공사 (모든 것의 전제)
+- [x] 입력 파이프라인: 마우스 메시지 → 셀 히트테스트 (즉시 리페인트, MsgWait 루프)
+- [x] 히트영역 레지스트리 + UiState (호버/휠 스크롤/클릭 라우팅)
+- [x] `dcc.conf` 로더 + 저장 즉시 반영 (launcher/rss/calendar/git/display 섹션)
+- [x] 토스트 + 저널 코어 (모든 서브시스템의 단일 이벤트 채널)
+- [x] 네트워크 워커 (WinHTTP, 주기 폴링, 실패 시 이전 값 유지)
+- [x] 단일 인스턴스 가드 + `--restore-icons` 색 복원 버그 수정
+- [x] (추가) 전각(한글) 렌더링 — 2셀 글리프 + 셀 고정 페인팅
+- [x] (추가) 셀 밀도 상향 200→273열, `--shot` 프리뷰에 피드 프리페치
 
-- [ ] 입력 파이프라인: WM_MOUSEMOVE/LBUTTONDOWN/RBUTTONDOWN/MOUSEWHEEL → 셀 좌표 히트테스트
-- [ ] 히트영역 레지스트리: 각 패널이 렌더 시 클릭/호버/휠 영역을 등록, 프레임마다 갱신
-- [ ] 즉시 리페인트: 입력 이벤트 시 1초 틱을 기다리지 않고 바로 그리기 (호버 반응속도)
-- [ ] UiState: hover 셀, 패널별 스크롤 오프셋, 확인 대기(2단계 클릭) 상태
-- [ ] `dcc.toml` 로더 + 파일 변경 감시(ReadDirectoryChangesW) → 저장하면 즉시 반영
-- [ ] 토스트 코어: 우상단 스택, 수명, 종류별 색 — 모든 후속 기능의 출력 채널
-- [ ] 저널 코어: 토스트로 흐른 모든 이벤트의 시간순 링버퍼 + 휠 스크롤
-- [ ] 네트워크 워커: 주기 폴링 + 캐시 + 지수 백오프 (WinHTTP)
-- [ ] 단일 인스턴스 가드(named mutex), `--restore-icons` 색 복원 버그 수정
+## Phase 1 — 로컬 도구 ✅
 
-## Phase 1 — 손에 잡히는 가치 (로컬만으로 완성)
+- [x] 런처 타일 (dcc.conf → 클릭 실행)
+- [x] 클립보드 히스토리 (재시도 큐, 클릭 재복사)
+- [x] 다운로드 감시 (완료 토스트, 저널 클릭 → 열기)
+- [x] GPU 패널 (nvml.dll 직접 로드 — 사용률/VRAM/온도/전력/그래프)
+- [x] 시간 진행률 (Y/M/D)
+- [x] 뽀모도로 — 브라유 고해상도 파이, 시간 숨김, 호버 시 표시, 클릭/우클릭
 
-- [ ] 런처 타일: dcc.toml에 앱/폴더/URL/프로젝트 정의 → 타일 렌더 → 클릭 실행 (ShellExecuteW)
-- [ ] 클립보드 히스토리: AddClipboardFormatListener → 최근 N개 → 클릭 재복사 (텍스트 우선)
-- [ ] 다운로드 감시: Downloads 폴더 ReadDirectoryChangesW → 새 파일 행 + 완료 토스트 → 클릭 열기/폴더
-- [ ] GPU 패널: NVML(nvml-wrapper) — 사용률/VRAM/온도/전력 + 스파크라인
-- [ ] 시간 진행률: 올해/이번달/오늘 % 도트 매트릭스
-- [ ] 뽀모도로: 클릭 시작/일시정지/리셋, 종료 토스트 + 저널 기록
+## Phase 2 — 피드 ✅
 
-## Phase 2 — 피드 (네트워크 워커 위에)
+- [x] 날씨 (Open-Meteo, 서울)
+- [x] 환율 USD/KRW + BTC (업비트, 등락률)
+- [x] 뉴스 — RSS/Atom 겸용 파서, 기본 Geek News, 클릭 → 브라우저
+- [~] 캘린더 ICS — 구현 완료, **비밀 iCal URL을 dcc.conf [calendar]에 붙여넣어야 표시됨**
 
-- [ ] 날씨: Open-Meteo (키 불필요) — 기온/강수/바람
-- [ ] 환율·코인 티커: USD/KRW 등 심볼 몇 개, 변동률 색
-- [ ] RSS/HN 헤드라인: 구독 목록 → 최신 N개 → 클릭 브라우저, 새 글 토스트(옵션)
-- [ ] 오늘 일정: Google Calendar — 1단계 비밀 ICS 읽기 → (Phase 4에서 OAuth 승격)
+## Phase 3 — 추적/개발자 패널 ✅
 
-## Phase 3 — 개발자 패널 (원래 정체성 완성)
-
-- [ ] git 수집기: 지정 루트 스캔 — 브랜치/dirty/ahead/오늘 커밋, 최근 커밋 피드
-- [ ] git 잔디: 로컬 저장소 커밋 히스토리 → 연간 기여 히트맵 (GitHub 잔디의 로컬판)
-- [ ] claude 수집기: ~/.claude 트랜스크립트 → 오늘/7일 토큰·비용·라이브 세션
-- [ ] 이벤트 토스트 배선: 새 커밋 / claude 세션 시작 → 토스트
+- [x] git 수집기 — repo 스캔(2단계), 브랜치/dirty/ahead, 통합 커밋 피드, 5분 주기
+- [x] git 잔디 — 실제 26주 커밋 히트맵
+- [x] claude 수집기 — 트랜스크립트 증분 파싱, 오늘/7d 토큰·비용, 14d 그래프, 세션 보드(Herd 스타일)
+- [x] Windows 이벤트 로그 구독 — 앱 크래시·서비스 사망·디스크·재부팅·Defender (큐레이션, Sysmon 제외 확정)
+- [ ] 신규 커밋/claude 세션 시작 → 토스트 (수집은 되나 diff 알림 배선 안 됨)
 - [ ] repo 행 클릭 → VS Code/터미널/탐색기 (프로젝트 허브화)
-- [ ] Windows 이벤트 로그 구독(EvtSubscribe): 큐레이션 허용목록만 —
-      앱 크래시(1000/1002), 서비스 사망(7031/7034), 디스크(7/51/153, NTFS 55),
-      예기치 않은 재부팅(41/6008), Defender(1116) → 저널 + 심각도 높은 것만 토스트
-      (Sysmon은 도입하지 않음 — 노이즈 대비 가치 낮음)
 
-## Phase 4 — 팔레트 & 클라우드 (키보드 예외 지점)
+## Phase 4 — 팔레트 & 클라우드
 
-- [ ] 전역 단축키(RegisterHotKey) → 팔레트 오버레이: 이 순간만 포커스 획득, Esc/외부클릭 반납
-- [ ] Everything SDK 연동 파일 검색 (미설치 시 안내)
-- [ ] 팔레트 명령: 런처 필터 실행 / todo 추가 / 일정 추가 / 타이머 시작
-- [ ] Todo 패널: TODO.md 기반, 클릭 토글, 팔레트로 추가
-- [ ] Google OAuth (Calendar + Drive 스코프 한 번에):
-      - Calendar 읽기/쓰기 — 팔레트에서 일정 추가
-      - Drive 드롭존 — 파일 드래그 → 업로드 → 완료 토스트(공유링크)
-      - ※ Google Drive for Desktop이 설치돼 있으면 드롭존은 미러 폴더 복사로 단순화 가능
-- [ ] 드롭존 일반화(IDropTarget): Drive 업로드 / 지정 폴더 정리 / 휴지통
+- [x] 전역 단축키 Ctrl+` → 팔레트 (포커스 예외 지점, Esc/포커스 이탈 시 닫힘)
+- [x] Everything IPC 파일 검색 (미실행 시 안내)
+- [~] 팔레트 명령 — 런처 필터 [x] · `+todo` 추가 [x] · 일정 추가 [ ](OAuth 필요) · 타이머 시작 [ ]
+- [x] Todo 패널 — TODO.md 실파일, 클릭 토글, 외부 편집 감시
+- [x] 드롭존 (IDropTarget) — Drive 미러 복사 / 확장자 정리 / 휴지통, 드래그 중 존 하이라이트
+- [ ] Google OAuth (Calendar 쓰기 + Drive API) — 팔레트에서 일정 추가용. GCP OAuth 클라이언트 생성 필요(사용자 작업)
 
-## 보류/제외 (이번 결정)
+## 추적/관측 확장 (로드맵 외 추가 완료)
 
-- 오디오 스펙트럼, CRT/노이즈/글리치, 부팅 시퀀스, 타이핑 터미널 연출 — 제외
-- Sysmon — 제외 (표준 이벤트 로그 큐레이션으로 대체)
-- 치지직/트위치 라이브, Now Playing 미디어 컨트롤, 프로세스 kill — 후보로만 보류
+- [x] 4존 레이아웃 (좌 리소스 / 중 추적 / 우상 일상 / 우하 툴)
+- [x] hot 5열 — CPU / MEM / IO/s / NET/s / CONN
+- [x] 프로세스별 IO 전송률 (커널 카운터) + 개별 CPU 스파크라인
+- [x] 프로세스별 네트워크 바이트 — ETW Kernel-Network (관리자, 비승격 시 conn 폴백)
+- [x] 멀티메트릭 스파이크 로그 — cpu/io/net/gpu/lat/mem, 히스테리시스 + 지속조건(mem 4s, gpu 2s)
+- [x] USE 패널 — run queue, hard faults/s, commit%, net err/s, sys io r/w, ICMP 레이턴시 그래프
+- [x] us/sy/dpc 분리 + 인터럽트/s (vmstat 스타일)
+- [x] load average 합성 (1/5/15분 EMA)
+- [x] 타임라인 2h (30s 해상도 cpu/gpu)
+- [x] 임계 경보 → 토스트 (run queue, hard faults, 핑 3연속 타임아웃)
+
+## 운영/품질 (추가 완료)
+
+- [x] 관리자 권한 스케줄러 자동시작 (`DCC Wallpaper`, RL HIGHEST)
+- [x] OLED 보호 — 픽셀 시프트(5분 궤도) + 야간 감광(23-08, dcc.conf)
+- [x] soft 저채도 테마 옵션 (`theme = soft`, 라이브 전환)
+- [x] git 저장소 초기화 + 커밋 관리 시작
+
+## 남은 것 / 다음 후보
+
+- [ ] Google OAuth (일정 추가·Drive API 직접 업로드)
+- [ ] 커밋/세션 diff 토스트 + repo 행 클릭 액션
+- [ ] 디스크별 큐/busy (PDH PhysicalDisk) — sar -d
+- [ ] 메모리 세분화 (standby/cache, si/so 분리)
+- [ ] 팔레트 한글 IME 조합 개선
+- 보류 후보: 치지직 라이브 알림, Now Playing 미디어 컨트롤, 프로세스 kill(2단계 확인)
+- 제외 확정: 오디오 스펙트럼, CRT/노이즈/글리치, 부팅 시퀀스, 타이핑 터미널, Sysmon
