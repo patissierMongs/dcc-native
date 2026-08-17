@@ -8,16 +8,25 @@
 use windows::core::*;
 use windows::Win32::Networking::WinHttp::*;
 
-const MAX_BODY: usize = 1024 * 1024;
+const MAX_BODY: usize = 8 * 1024 * 1024;
 
-/// Split "https://host/path" into (host, path). Only https, only port 443 —
-/// every endpoint we talk to is https.
-fn split(url: &str) -> Option<(String, String)> {
-    let rest = url.strip_prefix("https://")?;
-    match rest.split_once('/') {
-        Some((host, path)) => Some((host.to_string(), format!("/{}", path))),
-        None => Some((rest.to_string(), "/".to_string())),
-    }
+/// Split a URL into (secure, host, port, path). https for the world,
+/// plain http for localhost services like aw-server.
+fn split(url: &str) -> Option<(bool, String, u16, String)> {
+    let (secure, rest) = if let Some(r) = url.strip_prefix("https://") {
+        (true, r)
+    } else {
+        (false, url.strip_prefix("http://")?)
+    };
+    let (hostport, path) = match rest.split_once('/') {
+        Some((h, p)) => (h.to_string(), format!("/{}", p)),
+        None => (rest.to_string(), "/".to_string()),
+    };
+    let (host, port) = match hostport.split_once(':') {
+        Some((h, p)) => (h.to_string(), p.parse().ok()?),
+        None => (hostport, if secure { 443 } else { 80 }),
+    };
+    Some((secure, host, port, path))
 }
 
 fn wide(s: &str) -> Vec<u16> {
@@ -25,7 +34,7 @@ fn wide(s: &str) -> Vec<u16> {
 }
 
 pub fn get(url: &str) -> Option<String> {
-    let (host, path) = split(url)?;
+    let (secure, host, port, path) = split(url)?;
     unsafe {
         let session = WinHttpOpen(
             w!("dcc-wallpaper/0.1"),
@@ -40,7 +49,7 @@ pub fn get(url: &str) -> Option<String> {
         let out = (|| {
             let _ = WinHttpSetTimeouts(session, 5000, 5000, 5000, 10000);
             let host_w = wide(&host);
-            let conn = WinHttpConnect(session, PCWSTR(host_w.as_ptr()), INTERNET_DEFAULT_HTTPS_PORT, 0);
+            let conn = WinHttpConnect(session, PCWSTR(host_w.as_ptr()), port, 0);
             if conn.is_null() {
                 return None;
             }
@@ -53,7 +62,7 @@ pub fn get(url: &str) -> Option<String> {
                     PCWSTR::null(),
                     PCWSTR::null(),
                     std::ptr::null_mut(),
-                    WINHTTP_FLAG_SECURE,
+                    if secure { WINHTTP_FLAG_SECURE } else { WINHTTP_OPEN_REQUEST_FLAGS(0) },
                 );
                 if req.is_null() {
                     return None;

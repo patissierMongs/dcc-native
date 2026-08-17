@@ -83,12 +83,14 @@ pub fn render(g: &mut Grid, t: &Theme, s: &Snapshot, frame: u64, ui: &UiState, r
     let feeds = crate::feeds::get();
     let rx = lw + mw;
     let day_h = 10;
-    let news_h = 9;
+    let news_h = 8;
+    let focus_h = 9;
     panel_day(g, t, &feeds, rx, top, rw, day_h);
     panel_news(g, t, &feeds, rx, top + day_h, rw, news_h, ui, regions);
+    panel_focus(g, t, &feeds, rx, top + day_h + news_h, rw, focus_h);
 
-    let ty = top + day_h + news_h;
-    let tools_h = body_h.saturating_sub(day_h + news_h);
+    let ty = top + day_h + news_h + focus_h;
+    let tools_h = body_h.saturating_sub(day_h + news_h + focus_h);
     let rsl = rw / 2;
     let rsr = rw - rsl;
     // left tool stack: run / clip / drop
@@ -796,6 +798,56 @@ fn panel_news(
         let hovered = hover_row == Some(i);
         g.put(ix, cy, if hovered { '▸' } else { '·' }, if hovered { t.bright } else { t.frame });
         g.text_clip_end(ix + 2, cy, &hl.title, x + w - 2, if hovered { t.bright } else { t.fg });
+    }
+}
+
+fn fmt_hm(secs: u64) -> String {
+    if secs >= 3600 {
+        format!("{}h{:02}m", secs / 3600, (secs % 3600) / 60)
+    } else {
+        format!("{}m", secs / 60)
+    }
+}
+
+/// Today's screen time from ActivityWatch — the measured counterpart to the
+/// pomodoro's intent.
+fn panel_focus(g: &mut Grid, t: &Theme, f: &crate::feeds::Feeds, x: usize, y: usize, w: usize, h: usize) {
+    g.panel(x, y, w, h, "focus · today", t.frame, t.ok);
+    let ix = x + 2;
+    let iw = w - 4;
+    let aw = &f.aw;
+    if !aw.ok {
+        g.text(ix, y + 1, "activitywatch not reachable", t.frame);
+        return;
+    }
+
+    let mut cx = g.text(ix, y + 1, "active", t.label);
+    cx = g.text(cx + 1, y + 1, &fmt_hm(aw.active_secs), t.bright);
+    cx = g.text(cx + 2, y + 1, "afk", t.label);
+    g.text(cx + 1, y + 1, &fmt_hm(aw.afk_secs), t.frame);
+    let total = aw.active_secs + aw.afk_secs;
+    if total > 0 {
+        g.text_right(
+            x + w - 2,
+            y + 1,
+            &format!("{:.0}% at the wheel", aw.active_secs as f64 / total as f64 * 100.0),
+            t.label,
+        );
+    }
+
+    let top_secs = aw.apps.first().map(|a| a.secs).unwrap_or(1).max(1);
+    for (i, a) in aw.apps.iter().enumerate() {
+        let cy = y + 2 + i;
+        if cy >= y + h - 1 {
+            break;
+        }
+        g.text_clip(ix, cy, &a.app, 14, t.fg);
+        let bar_w = iw.saturating_sub(24);
+        g.meter(ix + 15, cy, bar_w, a.secs as f64 / top_secs as f64, t.ok, t.frame);
+        g.text_right(x + w - 2, cy, &fmt_hm(a.secs), t.label);
+    }
+    if aw.apps.is_empty() {
+        g.text(ix, y + 2, "(no window events yet today)", t.frame);
     }
 }
 

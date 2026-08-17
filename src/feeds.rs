@@ -43,12 +43,28 @@ pub struct CalEvent {
 }
 
 #[derive(Clone, Default)]
+pub struct AwApp {
+    pub app: String,
+    pub secs: u64,
+}
+
+/// Today's screen time, from the local ActivityWatch server.
+#[derive(Clone, Default)]
+pub struct AwDay {
+    pub ok: bool,
+    pub active_secs: u64,
+    pub afk_secs: u64,
+    pub apps: Vec<AwApp>,
+}
+
+#[derive(Clone, Default)]
 pub struct Feeds {
     pub weather: Weather,
     pub ticker: Ticker,
     pub news: Vec<Headline>,
     pub cal: Vec<CalEvent>,
     pub cal_configured: bool,
+    pub aw: AwDay,
 }
 
 static FEEDS: Mutex<Feeds> = Mutex::new(Feeds {
@@ -65,6 +81,7 @@ static FEEDS: Mutex<Feeds> = Mutex::new(Feeds {
     news: Vec::new(),
     cal: Vec::new(),
     cal_configured: false,
+    aw: AwDay { ok: false, active_secs: 0, afk_secs: 0, apps: Vec::new() },
 });
 
 pub fn get() -> Feeds {
@@ -354,6 +371,88 @@ fn fetch_calendar() {
     }
 }
 
+// ── activitywatch ─────────────────────────────────────────────────────────
+
+fn iso_utc(epoch: i64) -> String {
+    let days = epoch.div_euclid(86400);
+    let rem = epoch.rem_euclid(86400);
+    let (y, m, d) = crate::claude::ymd_from_days(days);
+    format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z", y, m, d, rem / 3600, (rem % 3600) / 60, rem % 60)
+}
+
+/// The full bucket id whose name starts with `prefix` (ids carry the host).
+fn find_bucket(json: &str, prefix: &str) -> Option<String> {
+    let at = json.find(&format!("\"{}", prefix))? + 1;
+    let end = json[at..].find('"')? + at;
+    Some(json[at..end].to_string())
+}
+
+/// Today's window/afk events from aw-server, aggregated by app.
+fn fetch_aw() {
+    const BASE: &str = "http://127.0.0.1:5600/api/0";
+    let Some(buckets) = crate::http::get(&format!("{}/buckets/", BASE)) else {
+        if let Ok(mut f) = FEEDS.lock() {
+            f.aw.ok = false;
+        }
+        return;
+    };
+    let off_min = utc_offset_minutes();
+    let now_epoch = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let (y, mo, d, _, _, _) = crate::collect::local_time();
+    let midnight_utc = crate::claude::days_from_ymd(y as i64, mo as i64, d as i64) * 86400 - off_min * 60;
+    let range = format!("start={}&end={}&limit=15000", iso_utc(midnight_utc), iso_utc(now_epoch));
+
+    let mut day = AwDay::default();
+
+    if let Some(id) = find_bucket(&buckets, "aw-watcher-window_") {
+        if let Some(body) = crate::http::get(&format!("{}/buckets/{}/events?{}", BASE, id, range)) {
+            let mut agg: std::collections::HashMap<String, f64> = std::collections::HashMap::new();
+            for chunk in body.split("\"timestamp\"").skip(1) {
+                let dur = num_after(chunk, "duration").unwrap_or(0.0);
+                let Some(app) = str_after_local(chunk, "app") else { continue };
+                let app = app.to_lowercase();
+                let app = app.strip_suffix(".exe").unwrap_or(&app).to_string();
+                *agg.entry(app).or_insert(0.0) += dur;
+            }
+            let mut apps: Vec<AwApp> = agg
+                .into_iter()
+                .map(|(app, s)| AwApp { app, secs: s as u64 })
+                .filter(|a| a.secs >= 60)
+                .collect();
+            apps.sort_by(|a, b| b.secs.cmp(&a.secs));
+            apps.truncate(6);
+            day.apps = apps;
+            day.ok = true;
+        }
+    }
+    if let Some(id) = find_bucket(&buckets, "aw-watcher-afk_") {
+        if let Some(body) = crate::http::get(&format!("{}/buckets/{}/events?{}", BASE, id, range)) {
+            for chunk in body.split("\"timestamp\"").skip(1) {
+                let dur = num_after(chunk, "duration").unwrap_or(0.0) as u64;
+                match str_after_local(chunk, "status").as_deref() {
+                    Some("not-afk") => day.active_secs += dur,
+                    Some("afk") => day.afk_secs += dur,
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    if let Ok(mut f) = FEEDS.lock() {
+        f.aw = day;
+    }
+}
+
+fn str_after_local(hay: &str, key: &str) -> Option<String> {
+    let pat = format!("\"{}\":\"", key);
+    let at = hay.find(&pat)? + pat.len();
+    let end = hay[at..].find('"')? + at;
+    Some(hay[at..end].to_string())
+}
+
 // ── the worker ────────────────────────────────────────────────────────────
 
 /// Fetch everything once, synchronously — used by `--shot` so previews show
@@ -364,14 +463,15 @@ pub fn prefetch() {
     fetch_btc();
     fetch_news();
     fetch_calendar();
+    fetch_aw();
 }
 
 pub fn spawn() {
     std::thread::spawn(|| {
         let t0 = Instant::now() - Duration::from_secs(3600);
-        let mut last = [t0; 5]; // weather, fx, btc, news, cal
-        let every = [600u64, 1800, 300, 600, 900];
-        let jobs: [fn(); 5] = [fetch_weather, fetch_fx, fetch_btc, fetch_news, fetch_calendar];
+        let mut last = [t0; 6]; // weather, fx, btc, news, cal, aw
+        let every = [600u64, 1800, 300, 600, 900, 120];
+        let jobs: [fn(); 6] = [fetch_weather, fetch_fx, fetch_btc, fetch_news, fetch_calendar, fetch_aw];
         loop {
             for i in 0..jobs.len() {
                 if last[i].elapsed().as_secs() >= every[i] {
