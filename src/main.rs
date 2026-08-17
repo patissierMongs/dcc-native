@@ -8,6 +8,8 @@ mod clipboard;
 mod collect;
 mod config;
 mod desktop;
+mod drop;
+mod eventlog;
 mod events;
 mod feeds;
 mod gfx;
@@ -510,6 +512,12 @@ fn main() -> Result<()> {
         let mut ui_state = input::UiState::default();
         let mut regions = input::Regions::default();
         let (cell_w, cell_h) = (renderer.painter.cell_w, renderer.painter.cell_h);
+
+        // Drop zones need OLE proper (CoInitialize is not enough for
+        // RegisterDragDrop), and the event-log subscriptions ride along.
+        let _ = windows::Win32::System::Ole::OleInitialize(None);
+        drop::register(hwnd, cell_w, cell_h);
+        eventlog::start();
 
         loop {
             // Sleep until either the next tick or an input message: hover

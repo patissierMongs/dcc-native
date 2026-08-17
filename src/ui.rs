@@ -409,8 +409,13 @@ fn panel_use(g: &mut Grid, t: &Theme, s: &Snapshot, x: usize, y: usize, w: usize
     let rq_fg = if rq as usize > s.cores * 2 { t.crit } else if rq as usize > s.cores { t.warn } else { t.ok };
     g.text(ix, cy, "cpu queue", t.label);
     g.text(ix + 13, cy, &format!("{:>4}", rq), rq_fg);
-    g.text(ix + 19, cy, &format!("ready / {} cores", s.cores), t.frame);
-    g.text_right(x + w - 2, cy, &format!("ctx {:.0}k/s", s.ctx_switches_ps / 1000.0), t.label);
+    g.text(ix + 19, cy, &format!("/ {} cores", s.cores), t.frame);
+    g.text_right(
+        x + w - 2,
+        cy,
+        &format!("ld {:.1}·{:.1}·{:.1} · ctx {:.0}k", s.load1, s.load5, s.load15, s.ctx_switches_ps / 1000.0),
+        t.label,
+    );
     cy += 1;
 
     // memory: hard faults + commit
@@ -855,16 +860,44 @@ fn panel_clip(
     }
 }
 
-/// Placeholder for the phase-4 drop targets.
+/// Live OLE drop targets. During a drag the hovered zone lights up; a drop
+/// anywhere else on the wall defaults to the drive zone.
 fn panel_drop(g: &mut Grid, t: &Theme, x: usize, y: usize, w: usize, h: usize) {
-    g.panel(x, y, w, h, "drop · demo", t.frame, t.label);
+    let dragging = crate::drop::dragging();
+    let hz = crate::drop::hover_zone();
+    g.panel(x, y, w, h, "drop", t.frame, if dragging { t.bright } else { t.ok });
+
+    crate::drop::set_zones(vec![
+        (x + 1, y + 1, w - 2, 1, 0),
+        (x + 1, y + 2, w - 2, 1, 1),
+        (x + 1, y + 3, w - 2, 1, 2),
+    ]);
+
     let ix = x + 2;
-    if h > 3 {
-        g.text(ix, y + 1, "⇩ drag files here", t.label);
-        g.text(ix, y + 2, "→ drive · sort · trash", t.frame);
+    let rows: [(u8, &str, &str, u32); 3] = [
+        (0, "▲ drive", "copy + sync", t.cyan),
+        (1, "▤ sort", "by extension", t.ok),
+        (2, "✕ trash", "recycle bin", t.crit),
+    ];
+    for (z, label, hint, accent) in rows {
+        let cy = y + 1 + z as usize;
+        if cy >= y + h - 1 {
+            break;
+        }
+        let hot = hz == Some(z);
+        if hot {
+            g.put(ix - 1, cy, '▸', t.bright);
+        }
+        g.text(ix, cy, label, if hot { t.bright } else { accent });
+        g.text_right(x + w - 2, cy, hint, if hot { t.bright } else { t.frame });
     }
     if h > 5 {
-        g.text(ix, y + h - 2, "(phase 4)", t.frame);
+        g.text(
+            ix,
+            y + h - 2,
+            if dragging { "release to file it" } else { "drag files here" },
+            if dragging { t.bright } else { t.frame },
+        );
     }
 }
 

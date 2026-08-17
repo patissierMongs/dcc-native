@@ -3,9 +3,15 @@ name = "dcc"
 version = "0.1.0"
 edition = "2021"
 
+[dependencies]
+windows-core = "0.62"
+
 [dependencies.windows]
 version = "0.62.2"
 features = [
+    "Win32_System_EventLog",
+    "Win32_System_Ole",
+    "Win32_System_SystemServices",
     "Win32_Foundation",
     "Win32_Graphics_Direct2D",
     "Win32_Graphics_Direct2D_Common",

@@ -173,6 +173,10 @@ pub struct Snapshot {
     pub ping_ms: f64,
     pub ping_ok: bool,
     pub ping_hist: Vec<f64>,
+    /// Synthesised load averages: EMA of (run queue + running work).
+    pub load1: f64,
+    pub load5: f64,
+    pub load15: f64,
     /// True while the git panels hold placeholder data — their titles carry
     /// a "demo" tag so nobody mistakes the dress rehearsal for fact.
     pub demo: bool,

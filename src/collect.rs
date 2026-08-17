@@ -117,6 +117,7 @@ pub struct Collector {
     prev_perf: Option<(u64, u64, u64, u64)>,
     warn_cpu_tick: u64,
     warn_mem_tick: u64,
+    load: (f64, f64, f64),
     last: Instant,
     proc_clock: Instant,
     tick: u64,
@@ -170,6 +171,7 @@ impl Collector {
             prev_perf: None,
             warn_cpu_tick: 0,
             warn_mem_tick: 0,
+            load: (0.0, 0.0, 0.0),
             last: Instant::now(),
             proc_clock: Instant::now(),
             tick: 0,
@@ -752,6 +754,18 @@ impl Collector {
             self.spike_track("lat", "ping", lat, 200.0, 100.0);
         }
         self.spike_sweep();
+
+        // Unix-style load averages, synthesised: instantaneous load is the
+        // run queue plus the currently-executing share of the cores.
+        let inst = into.run_queue as f64 + into.cpu_pct / 100.0 * self.cores as f64;
+        let ema = |cur: f64, tau: f64| {
+            let a = (-dt / tau).exp();
+            cur * a + inst * (1.0 - a)
+        };
+        self.load = (ema(self.load.0, 60.0), ema(self.load.1, 300.0), ema(self.load.2, 900.0));
+        into.load1 = self.load.0;
+        into.load5 = self.load.1;
+        into.load15 = self.load.2;
 
         into.spikes = self.spikes_snapshot();
         into.collect_micros = t0.elapsed().as_micros() as u64;
