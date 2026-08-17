@@ -1,0 +1,5 @@
+# No Visual Studio on this machine, so no link.exe. MSYS2's UCRT64 gcc is
+# installed and rustup already has the gnu toolchain, so build against that.
+# Switch to stable-x86_64-pc-windows-msvc if VS Build Tools ever get installed.
+[toolchain]
+channel = "stable-x86_64-pc-windows-gnu"
