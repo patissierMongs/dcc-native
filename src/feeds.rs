@@ -446,11 +446,14 @@ fn fetch_aw() {
     }
 }
 
+/// String value after `"key":` — tolerating the space aw-server puts after
+/// the colon, which the compact-JSON parsers elsewhere never see.
 fn str_after_local(hay: &str, key: &str) -> Option<String> {
-    let pat = format!("\"{}\":\"", key);
+    let pat = format!("\"{}\":", key);
     let at = hay.find(&pat)? + pat.len();
-    let end = hay[at..].find('"')? + at;
-    Some(hay[at..end].to_string())
+    let rest = hay[at..].trim_start().strip_prefix('"')?;
+    let end = rest.find('"')?;
+    Some(rest[..end].to_string())
 }
 
 // ── the worker ────────────────────────────────────────────────────────────
