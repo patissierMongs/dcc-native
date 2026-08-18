@@ -33,11 +33,13 @@ pub fn render(g: &mut Grid, t: &Theme, s: &Snapshot, frame: u64, ui: &UiState, r
     let rw = 64.min(cols / 3);
     let mw = cols - lw - rw;
 
-    // ── left: resources ──────────────────────────────────────────────────
-    let sys_h = 10;
-    let gpu_h = 9;
-    let mem_h = 7;
-    let net_h = 9;
+    // ── left: resources. Dense grids get the full stack; scaled-up ones
+    // (fewer rows) get slightly shorter panels so everything still fits.
+    let tight = body_h < 46;
+    let sys_h = if tight { 9 } else { 10 };
+    let gpu_h = if tight { 8 } else { 9 };
+    let mem_h = if tight { 6 } else { 7 };
+    let net_h = if tight { 7 } else { 9 };
     let clk_h = 8;
     let vol_h = body_h.saturating_sub(sys_h + gpu_h + mem_h + net_h + clk_h);
     let mut ly = top;
@@ -65,15 +67,15 @@ pub fn render(g: &mut Grid, t: &Theme, s: &Snapshot, frame: u64, ui: &UiState, r
     let y2 = top + hot_h;
     let sub_h = body_h.saturating_sub(hot_h);
 
-    let spikes_h = 14;
-    let use_h = 14;
+    let spikes_h = if tight { 11 } else { 14 };
+    let use_h = if tight { 10 } else { 14 };
     let journal_h = sub_h.saturating_sub(spikes_h + use_h);
     panel_spikes(g, t, s, ax, y2, maw, spikes_h);
     panel_use(g, t, s, ax, y2 + spikes_h, maw, use_h);
     panel_journal(g, t, ax, y2 + spikes_h + use_h, maw, journal_h, ui, regions);
 
-    let tl_h = 14;
-    let git_h = 19;
+    let tl_h = if tight { 10 } else { 14 };
+    let git_h = if tight { 17 } else { 19 };
     let claude_h = sub_h.saturating_sub(tl_h + git_h);
     panel_timeline(g, t, s, bx, y2, mbw, tl_h);
     panel_git(g, t, s, bx, y2 + tl_h, mbw, git_h);
@@ -82,9 +84,9 @@ pub fn render(g: &mut Grid, t: &Theme, s: &Snapshot, frame: u64, ui: &UiState, r
     // ── right: the day on top, tools below ───────────────────────────────
     let feeds = crate::feeds::get();
     let rx = lw + mw;
-    let day_h = 10;
-    let news_h = 8;
-    let focus_h = 9;
+    let day_h = if tight { 9 } else { 10 };
+    let news_h = if tight { 7 } else { 8 };
+    let focus_h = if tight { 8 } else { 9 };
     panel_day(g, t, &feeds, rx, top, rw, day_h);
     panel_news(g, t, &feeds, rx, top + day_h, rw, news_h, ui, regions);
     panel_focus(g, t, &feeds, rx, top + day_h + news_h, rw, focus_h);
