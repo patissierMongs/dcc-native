@@ -449,10 +449,11 @@ fn main() -> Result<()> {
         let _ = GetClientRect(hwnd, &mut rc);
         let (cw, ch) = ((rc.right - rc.left).max(64) as u32, (rc.bottom - rc.top).max(64) as u32);
 
-        // Roughly 19 physical pixels per cell — denser than the first cut, so
-        // the wall holds more panels; clamped so tiny and enormous screens
-        // both end up with a sane amount of information.
-        let cols = cols_override.unwrap_or_else(|| (cw as f32 / 19.0).clamp(150.0, 320.0));
+        // Roughly 19 physical pixels per cell at 100% scaling, divided by the
+        // monitor's DPI scale so the wall's text tracks the system scale the
+        // user chose — 125% scaling means 125% glyphs, like every other app.
+        let dpi_scale = (GetDpiForWindow(hwnd) as f32 / 96.0).max(0.5);
+        let cols = cols_override.unwrap_or_else(|| (cw as f32 / (19.0 * dpi_scale)).clamp(120.0, 320.0));
 
         // `--debug-bg` paints the surface magenta. If that colour is not on
         // screen, the problem is layering; if it is, the problem is drawing.
@@ -512,6 +513,7 @@ fn main() -> Result<()> {
         let mut ui_state = input::UiState::default();
         let mut regions = input::Regions::default();
         let (mut cell_w, mut cell_h) = (renderer.painter.cell_w, renderer.painter.cell_h);
+        let mut last_dpi = GetDpiForWindow(hwnd);
 
         // Drop zones need OLE proper (CoInitialize is not enough for
         // RegisterDragDrop), and the event-log subscriptions ride along.
@@ -651,24 +653,27 @@ fn main() -> Result<()> {
                 let _ = SetWindowPos(hwnd, z, x, y, w, h, flags);
             }
 
-            // Resolution and monitor-topology changes leave the window sized
-            // for a world that no longer exists. A child window gets no
-            // WM_DISPLAYCHANGE broadcast, so poll the geometry and refit
-            // everything — position, render target, font, grid — when it
-            // stops matching.
+            // Resolution, scaling and monitor-topology changes leave the
+            // window sized (or densified) for a world that no longer exists.
+            // A child window gets no WM_DISPLAYCHANGE broadcast, so poll the
+            // geometry and DPI, and refit everything — position, render
+            // target, font, grid — when either stops matching.
             if !windowed && frame % 20 == 5 {
                 let attached = !PIN_TO_BOTTOM.load(Ordering::Relaxed);
                 let (px, py, pw, ph) = target_rect(pick, span_all, attached);
                 let mut rc = RECT::default();
                 let _ = GetClientRect(hwnd, &mut rc);
-                if (rc.right - rc.left, rc.bottom - rc.top) != (pw, ph) {
+                let ndpi = GetDpiForWindow(hwnd);
+                if (rc.right - rc.left, rc.bottom - rc.top) != (pw, ph) || ndpi != last_dpi {
+                    last_dpi = ndpi;
                     let flags = if attached { SWP_NOACTIVATE | SWP_NOZORDER } else { SWP_NOACTIVATE };
                     let z = if attached { None } else { Some(HWND_BOTTOM) };
                     let _ = SetWindowPos(hwnd, z, px, py, pw, ph, flags);
                     let _ = GetClientRect(hwnd, &mut rc);
                     let ncw = (rc.right - rc.left).max(64) as u32;
                     let nch = (rc.bottom - rc.top).max(64) as u32;
-                    let ncols = cols_override.unwrap_or_else(|| (ncw as f32 / 19.0).clamp(150.0, 320.0));
+                    let nscale = (ndpi as f32 / 96.0).max(0.5);
+                    let ncols = cols_override.unwrap_or_else(|| (ncw as f32 / (19.0 * nscale)).clamp(120.0, 320.0));
                     if let Ok(r) = gfx::Renderer::new(hwnd, (ncw, nch), FONT, ncols) {
                         renderer = r;
                         let (c2, r2) = renderer.cols_rows();
