@@ -511,7 +511,7 @@ fn main() -> Result<()> {
         let mut msg = MSG::default();
         let mut ui_state = input::UiState::default();
         let mut regions = input::Regions::default();
-        let (cell_w, cell_h) = (renderer.painter.cell_w, renderer.painter.cell_h);
+        let (mut cell_w, mut cell_h) = (renderer.painter.cell_w, renderer.painter.cell_h);
 
         // Drop zones need OLE proper (CoInitialize is not enough for
         // RegisterDragDrop), and the event-log subscriptions ride along.
@@ -649,6 +649,45 @@ fn main() -> Result<()> {
                 let flags = if attached { SWP_NOACTIVATE | SWP_NOZORDER } else { SWP_NOACTIVATE };
                 let z = if attached { None } else { Some(HWND_BOTTOM) };
                 let _ = SetWindowPos(hwnd, z, x, y, w, h, flags);
+            }
+
+            // Resolution and monitor-topology changes leave the window sized
+            // for a world that no longer exists. A child window gets no
+            // WM_DISPLAYCHANGE broadcast, so poll the geometry and refit
+            // everything — position, render target, font, grid — when it
+            // stops matching.
+            if !windowed && frame % 20 == 5 {
+                let attached = !PIN_TO_BOTTOM.load(Ordering::Relaxed);
+                let (px, py, pw, ph) = target_rect(pick, span_all, attached);
+                let mut rc = RECT::default();
+                let _ = GetClientRect(hwnd, &mut rc);
+                if (rc.right - rc.left, rc.bottom - rc.top) != (pw, ph) {
+                    let flags = if attached { SWP_NOACTIVATE | SWP_NOZORDER } else { SWP_NOACTIVATE };
+                    let z = if attached { None } else { Some(HWND_BOTTOM) };
+                    let _ = SetWindowPos(hwnd, z, px, py, pw, ph, flags);
+                    let _ = GetClientRect(hwnd, &mut rc);
+                    let ncw = (rc.right - rc.left).max(64) as u32;
+                    let nch = (rc.bottom - rc.top).max(64) as u32;
+                    let ncols = cols_override.unwrap_or_else(|| (ncw as f32 / 19.0).clamp(150.0, 320.0));
+                    if let Ok(r) = gfx::Renderer::new(hwnd, (ncw, nch), FONT, ncols) {
+                        renderer = r;
+                        let (c2, r2) = renderer.cols_rows();
+                        g = Grid::new(c2, r2, th.fg);
+                        cell_w = renderer.painter.cell_w;
+                        cell_h = renderer.painter.cell_h;
+                        drop::set_cell_size(cell_w, cell_h);
+                        ui_state = input::UiState::default();
+                        log_line(&format!(
+                            "display changed → {}x{}px, {:.0}pt, grid {}x{}",
+                            ncw, nch, renderer.painter.pt, c2, r2
+                        ));
+                        events::post(
+                            events::Kind::Ok,
+                            "display changed",
+                            &format!("re-fitted {}x{} · grid {}x{}", ncw, nch, c2, r2),
+                        );
+                    }
+                }
             }
 
             let mut snap = shared.lock().unwrap().clone();

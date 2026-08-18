@@ -28,6 +28,14 @@ use crate::events;
 static ZONES: Mutex<Vec<(usize, usize, usize, usize, u8)>> = Mutex::new(Vec::new());
 /// Cursor cell while an OLE drag is over the window.
 static DRAG: Mutex<Option<(usize, usize)>> = Mutex::new(None);
+/// Cell metrics, updated when the display changes and the grid is refitted.
+static CELL: Mutex<(f32, f32)> = Mutex::new((1.0, 1.0));
+
+pub fn set_cell_size(w: f32, h: f32) {
+    if let Ok(mut c) = CELL.lock() {
+        *c = (w.max(1.0), h.max(1.0));
+    }
+}
 
 pub fn set_zones(z: Vec<(usize, usize, usize, usize, u8)>) {
     if let Ok(mut g) = ZONES.lock() {
@@ -157,8 +165,6 @@ fn perform(zone: u8, files: Vec<PathBuf>) {
 #[implement(IDropTarget)]
 struct DropTarget {
     hwnd: HWND,
-    cell_w: f32,
-    cell_h: f32,
 }
 
 impl DropTarget {
@@ -167,7 +173,8 @@ impl DropTarget {
         unsafe {
             let _ = ScreenToClient(self.hwnd, &mut p);
         }
-        let cell = ((p.x.max(0) as f32 / self.cell_w) as usize, (p.y.max(0) as f32 / self.cell_h) as usize);
+        let (cw, ch) = CELL.lock().map(|c| *c).unwrap_or((1.0, 1.0));
+        let cell = ((p.x.max(0) as f32 / cw) as usize, (p.y.max(0) as f32 / ch) as usize);
         if let Ok(mut d) = DRAG.lock() {
             *d = Some(cell);
         }
@@ -251,8 +258,9 @@ impl IDropTarget_Impl for DropTarget_Impl {
 
 /// OleInitialize + RegisterDragDrop; the target lives for the process.
 pub fn register(hwnd: HWND, cell_w: f32, cell_h: f32) {
+    set_cell_size(cell_w, cell_h);
     unsafe {
-        let target: IDropTarget = DropTarget { hwnd, cell_w, cell_h }.into();
+        let target: IDropTarget = DropTarget { hwnd }.into();
         if RegisterDragDrop(hwnd, &target).is_ok() {
             events::journal(events::Kind::Ok, "drop zones armed — drag files onto the wall");
             std::mem::forget(target);
