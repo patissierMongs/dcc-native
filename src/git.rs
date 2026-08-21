@@ -31,15 +31,48 @@ pub fn current() -> Option<GitData> {
     OUT.lock().ok().and_then(|o| o.clone())
 }
 
+/// Run git with a hard 30s ceiling. During heavy IO a git process can hang
+/// long enough for Windows to log an Application Hang against it — kill it
+/// and skip the repo this round instead of wedging the collector thread.
+/// Stdout is drained on a helper thread so a chatty log can't deadlock the
+/// pipe while we wait.
 fn run_git(repo: &PathBuf, args: &[&str]) -> Option<String> {
-    let out = Command::new("git")
+    use std::io::Read;
+    use std::process::Stdio;
+
+    let mut child = Command::new("git")
         .arg("-C")
         .arg(repo)
         .args(args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
         .creation_flags(CREATE_NO_WINDOW)
-        .output()
+        .spawn()
         .ok()?;
-    out.status.success().then(|| String::from_utf8_lossy(&out.stdout).into_owned())
+
+    let mut stdout = child.stdout.take()?;
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut buf = String::new();
+        let _ = stdout.read_to_string(&mut buf);
+        let _ = tx.send(buf);
+    });
+
+    match rx.recv_timeout(Duration::from_secs(30)) {
+        Ok(out) => {
+            let ok = child.wait().map(|s| s.success()).unwrap_or(false);
+            ok.then_some(out)
+        }
+        Err(_) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            crate::events::journal(
+                crate::events::Kind::Warn,
+                &format!("git: timeout, skipped {}", repo.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()),
+            );
+            None
+        }
+    }
 }
 
 /// Directories containing .git, up to two levels below each configured root.

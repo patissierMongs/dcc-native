@@ -712,7 +712,12 @@ impl Collector {
                 &format!("run queue {} on {} cores", into.run_queue, self.cores),
             );
         }
-        if into.hard_faults_ps > 500.0 && self.tick.saturating_sub(self.warn_mem_tick) > 120 {
+        // Only alarm when the sustained tracker agrees this is a real
+        // excursion (4s above 1000/s) — asset-streaming blips during game
+        // loads read as pressure to a raw threshold but aren't.
+        if self.spiking.contains_key("mem|hard faults")
+            && self.tick.saturating_sub(self.warn_mem_tick) > 300
+        {
             self.warn_mem_tick = self.tick;
             crate::events::post(
                 crate::events::Kind::Warn,

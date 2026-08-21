@@ -661,14 +661,29 @@ fn main() -> Result<()> {
             if !windowed && frame % 20 == 5 {
                 let attached = !PIN_TO_BOTTOM.load(Ordering::Relaxed);
                 let (px, py, pw, ph) = target_rect(pick, span_all, attached);
+                // Where the window should sit in *screen* coordinates — the
+                // check that catches a transient monitor topology having
+                // shoved us off-position while leaving the size intact.
+                let (ex, ey, _, _) = target_rect(pick, span_all, false);
                 let mut rc = RECT::default();
                 let _ = GetClientRect(hwnd, &mut rc);
+                let mut wr = RECT::default();
+                let _ = GetWindowRect(hwnd, &mut wr);
                 let ndpi = GetDpiForWindow(hwnd);
-                if (rc.right - rc.left, rc.bottom - rc.top) != (pw, ph) || ndpi != last_dpi {
+                let size_ok = (rc.right - rc.left, rc.bottom - rc.top) == (pw, ph);
+                let pos_ok = (wr.left, wr.top) == (ex, ey);
+                if !size_ok || !pos_ok || ndpi != last_dpi {
+                    let dpi_changed = ndpi != last_dpi;
                     last_dpi = ndpi;
                     let flags = if attached { SWP_NOACTIVATE | SWP_NOZORDER } else { SWP_NOACTIVATE };
                     let z = if attached { None } else { Some(HWND_BOTTOM) };
                     let _ = SetWindowPos(hwnd, z, px, py, pw, ph, flags);
+                    if size_ok && !dpi_changed {
+                        // Position-only drift: moved back, nothing to rebuild.
+                        log_line(&format!("position drift fixed → {},{}", px, py));
+                        frame += 1;
+                        continue;
+                    }
                     let _ = GetClientRect(hwnd, &mut rc);
                     let ncw = (rc.right - rc.left).max(64) as u32;
                     let nch = (rc.bottom - rc.top).max(64) as u32;
