@@ -122,6 +122,12 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) ->
             input::push(Raw::RightDown { x, y });
             LRESULT(0)
         }
+        // Swallowed: the default handling would bubble WM_CONTEXTMENU up to
+        // DefView, which answers with the shell's "New folder…" desktop menu.
+        // This monitor is not a desktop any more — right-click belongs to the
+        // wall's own panels.
+        WM_RBUTTONUP => LRESULT(0),
+        WM_CONTEXTMENU => LRESULT(0),
         _ if msg == clipboard::WM_CLIPBOARDUPDATE => {
             clipboard::on_update(hwnd);
             LRESULT(0)
