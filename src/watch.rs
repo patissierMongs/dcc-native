@@ -65,10 +65,25 @@ pub fn spawn() {
         let mut settling: HashMap<PathBuf, u64> = HashMap::new();
 
         crate::todo::refresh();
+        let mut pass: u64 = 0;
         loop {
             std::thread::sleep(Duration::from_secs(2));
+            pass += 1;
 
             crate::todo::refresh();
+
+            // Icon herding: shortly after start, then every five minutes.
+            if pass == 4 || pass % 150 == 0 {
+                if let Some(moved) = crate::icons::herd() {
+                    if moved > 0 {
+                        events::post(
+                            events::Kind::Ok,
+                            "icons herded",
+                            &format!("{} moved off the wall's monitor", moved),
+                        );
+                    }
+                }
+            }
 
             // Config reload on mtime change.
             if let Ok(meta) = std::fs::metadata(crate::config::path()) {

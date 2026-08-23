@@ -18,6 +18,7 @@ mod gpu;
 mod http;
 mod grid;
 mod iconlist;
+mod icons;
 mod input;
 mod monitors;
 mod net_etw;
@@ -480,6 +481,10 @@ fn main() -> Result<()> {
         // Clipboard history feeds off WM_CLIPBOARDUPDATE; the watcher thread
         // covers Downloads and live dcc.conf reloads; the feed worker fetches
         // weather, ticker, headlines and the calendar.
+        // Herd desktop icons off this monitor — only meaningful when the
+        // wall owns one monitor of several.
+        icons::set_enabled(!span_all && monitors::list().len() > 1);
+
         clipboard::register(hwnd);
         watch::spawn();
         feeds::spawn();
