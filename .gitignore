@@ -1,8 +1,11 @@
+# build output
 /target
+
+# local-only: toolchain pin, dev scripts, scratch captures and logs
+/rust-toolchain.toml
+/.dev/
 *.png
+!docs/img/*.png
 *.log
 *.err
-err.log
-out.log
-run.log
 NVIDIA Corporation/
