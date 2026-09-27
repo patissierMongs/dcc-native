@@ -78,12 +78,6 @@ impl Grid {
         Grid { cols, rows, cells: vec![blank; cols * rows], blank }
     }
 
-    pub fn resize(&mut self, cols: usize, rows: usize) {
-        self.cols = cols;
-        self.rows = rows;
-        self.cells = vec![self.blank; cols * rows];
-    }
-
     pub fn clear(&mut self) {
         for c in self.cells.iter_mut() {
             *c = self.blank;
@@ -212,23 +206,6 @@ impl Grid {
             self.put(x + 1 + i, y, ch, c);
         }
         self.put(x + w - 1, y, ']', empty_fg);
-    }
-
-    /// One-row sparkline from block glyphs, scaled to the series maximum.
-    pub fn spark(&mut self, x: usize, y: usize, data: &[f64], fg: u32, zero_fg: u32) {
-        let max = data.iter().cloned().fold(0.0_f64, f64::max);
-        for (i, v) in data.iter().enumerate() {
-            if *v <= 0.0 {
-                self.put(x + i, y, '·', zero_fg);
-                continue;
-            }
-            let lvl = if max > 0.0 {
-                ((v / max) * 8.0).ceil().clamp(1.0, 8.0) as usize
-            } else {
-                1
-            };
-            self.put(x + i, y, BLOCKS[lvl], fg);
-        }
     }
 
     /// Fill a rectangle with a shade glyph — used for the CRT texture bands.

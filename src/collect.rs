@@ -147,7 +147,15 @@ fn fmt_metric(metric: &str, v: f64) -> String {
     match metric {
         "cpu" | "gpu" => format!("{:.0}%", v),
         "io" => crate::state::fmt_bps(v),
-        "net" => format!("{:.0} Mbit/s", v),
+        // Two scales share the tag: per-process net is B/s, the system-wide
+        // "download" line is Mbit/s. Nothing legitimate sits in between.
+        "net" => {
+            if v >= 20_000.0 {
+                crate::state::fmt_bps(v)
+            } else {
+                format!("{:.0} Mbit/s", v)
+            }
+        }
         "lat" => format!("{:.0}ms", v),
         "mem" => format!("{:.0}/s", v),
         _ => format!("{:.0}", v),
@@ -359,7 +367,9 @@ impl Collector {
         for p in list.iter().take(20) {
             self.spike_track("cpu", &p.name.clone(), p.cpu_pct, 50.0, 35.0);
             self.spike_track("io", &p.name.clone(), p.io_bps, 200e6, 100e6);
-            self.spike_track("net", &p.name.clone(), p.net_bps, 25e6, 10e6);
+            // Low enough to catch an updater stub pulling packages at boot
+            // (~5 MB/s), sustained so one burst of a page load stays quiet.
+            self.spike_track_sustained("net", &p.name.clone(), p.net_bps, 5e6, 2e6, 2);
         }
 
         (list, count, threads, ready)
@@ -421,12 +431,15 @@ impl Collector {
         for key in done {
             if let Some(tr) = self.spiking.remove(&key) {
                 let (metric, name) = key.split_once('|').unwrap_or(("?", &key));
+                let peak_txt = fmt_metric(metric, tr.peak);
+                let dur = tick.saturating_sub(tr.start_tick);
+                crate::daylog::spike(metric, name, tr.peak, &peak_txt, dur, &tr.hms);
                 self.spike_log.push(crate::state::Spike {
                     hms: tr.hms,
                     metric: metric.to_string(),
                     name: name.to_string(),
-                    peak_txt: fmt_metric(metric, tr.peak),
-                    dur_secs: tick.saturating_sub(tr.start_tick),
+                    peak_txt,
+                    dur_secs: dur,
                     ongoing: false,
                 });
                 if self.spike_log.len() > 40 {
@@ -806,6 +819,9 @@ fn os_build() -> String {
 }
 
 /// CPU brand string straight from CPUID leaves 0x80000002..0x80000004.
+/// (`__cpuid` became a safe fn in recent toolchains; older ones still need
+/// the block.)
+#[allow(unused_unsafe)]
 fn cpu_brand() -> String {
     #[cfg(target_arch = "x86_64")]
     unsafe {

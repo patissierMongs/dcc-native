@@ -36,11 +36,18 @@ pub fn render(g: &mut Grid, t: &Theme, s: &Snapshot, frame: u64, ui: &UiState, r
     // ── left: resources. Dense grids get the full stack; scaled-up ones
     // (fewer rows) get slightly shorter panels so everything still fits.
     let tight = body_h < 46;
-    let sys_h = if tight { 9 } else { 10 };
-    let gpu_h = if tight { 8 } else { 9 };
+    let mut sys_h = if tight { 9 } else { 10 };
+    let mut gpu_h = if tight { 8 } else { 9 };
     let mem_h = if tight { 6 } else { 7 };
-    let net_h = if tight { 7 } else { 9 };
+    let mut net_h = if tight { 7 } else { 9 };
     let clk_h = 8;
+    // Tall screens: rows beyond what the volume list needs go to the three
+    // graphs instead of padding an empty panel.
+    let vol_want = (s.disks.len() + 2).clamp(4, 9);
+    let spare = body_h.saturating_sub(sys_h + gpu_h + mem_h + net_h + clk_h + vol_want);
+    sys_h += spare * 4 / 10;
+    net_h += spare * 3 / 10;
+    gpu_h += spare * 3 / 10;
     let vol_h = body_h.saturating_sub(sys_h + gpu_h + mem_h + net_h + clk_h);
     let mut ly = top;
     panel_sys(g, t, s, 0, ly, lw, sys_h);
@@ -95,14 +102,14 @@ pub fn render(g: &mut Grid, t: &Theme, s: &Snapshot, frame: u64, ui: &UiState, r
     let tools_h = body_h.saturating_sub(day_h + news_h + focus_h);
     let rsl = rw / 2;
     let rsr = rw - rsl;
-    // left tool stack: run / clip / drop
-    let items = crate::config::launcher();
-    let run_h = (items.len() + 2).clamp(3, 9);
-    let drop_h = 8.min(tools_h.saturating_sub(run_h + 4));
-    let clip_h = tools_h.saturating_sub(run_h + drop_h);
-    panel_launcher(g, t, &items, rx, ty, rsl, run_h, ui, regions);
-    panel_clip(g, t, rx, ty + run_h, rsl, clip_h, ui, regions);
-    panel_drop(g, t, rx, ty + run_h + clip_h, rsl, drop_h);
+    // left tool stack: day digest / clip / drop — the launcher lives in the
+    // palette now, its panel slot shows today's anomalies instead.
+    let day_dig_h = (if tight { 9 } else { 11 }).min(tools_h.saturating_sub(8));
+    let drop_h = 8.min(tools_h.saturating_sub(day_dig_h + 4));
+    let clip_h = tools_h.saturating_sub(day_dig_h + drop_h);
+    panel_daylog(g, t, rx, ty, rsl, day_dig_h, ui, regions);
+    panel_clip(g, t, rx, ty + day_dig_h, rsl, clip_h, ui, regions);
+    panel_drop(g, t, rx, ty + day_dig_h + clip_h, rsl, drop_h);
     // right tool stack: todo / pomodoro
     let pomo_h = 15.min(tools_h.saturating_sub(6));
     let todo_h = tools_h.saturating_sub(pomo_h);
@@ -607,7 +614,9 @@ fn panel_git(g: &mut Grid, t: &Theme, s: &Snapshot, x: usize, y: usize, w: usize
         }
         g.text(ix, cy, &format!("{:>3}", fmt_ago(c.secs_ago)), t.frame);
         g.text(ix + 4, cy, &c.hash, t.yellow);
-        g.text_clip(ix + 12, cy, &c.msg, iw.saturating_sub(12), t.fg);
+        // The feed merges every repo — say whose commit it is.
+        let cx = g.text_clip_end(ix + 12, cy, &c.repo, ix + 24, t.cyan);
+        g.text_clip_end(cx + 1, cy, &c.msg, x + w - 2, t.fg);
         cy += 1;
     }
 
@@ -663,7 +672,10 @@ fn panel_claude(g: &mut Grid, t: &Theme, s: &Snapshot, x: usize, y: usize, w: us
         let gh = h.saturating_sub(7 + board);
         let data = &c.sparkline;
         let max = data.iter().cloned().fold(0.0_f64, f64::max).max(0.001);
-        g.graph(ix, y + 5, iw, gh, data, max, t.magenta, t.frame);
+        // Fourteen days across the full width: each day gets an equal band.
+        let k = (iw / data.len()).max(1);
+        let wide: Vec<f64> = data.iter().flat_map(|v| std::iter::repeat(*v).take(k)).collect();
+        g.graph(ix, y + 5, iw, gh, &wide, max, t.magenta, t.frame);
         g.text(ix, y + 5, &format!("{}d", data.len()), t.frame);
         g.text_right(x + w - 2, y + 5, &c.top_model, t.label);
     }
@@ -706,10 +718,11 @@ fn panel_day(g: &mut Grid, t: &Theme, f: &crate::feeds::Feeds, x: usize, y: usiz
     let mut cy = y + 1;
 
     let wx = &f.weather;
+    let city = crate::config::weather().0.to_lowercase();
     if wx.ok {
-        let mut cx = g.text(ix, cy, "seoul", t.label);
+        let mut cx = g.text_clip_end(ix, cy, &city, ix + 16, t.label);
         cx = g.text(cx + 1, cy, &format!("{:.1}°", wx.temp_c), t.bright);
-        g.text_clip_end(cx + 1, cy, &wx.desc, x + w - 20, t.fg);
+        g.text_clip_end(cx + 1, cy, &format!("{} · {:.0}m/s", wx.desc, wx.wind_ms), x + w - 26, t.fg);
         g.text_right(
             x + w - 2,
             cy,
@@ -717,24 +730,30 @@ fn panel_day(g: &mut Grid, t: &Theme, f: &crate::feeds::Feeds, x: usize, y: usiz
             if wx.rain_prob >= 50.0 { t.cyan } else { t.label },
         );
     } else {
-        g.text(ix, cy, "seoul  — fetching…", t.frame);
+        g.text(ix, cy, &format!("{}  — fetching…", city), t.frame);
     }
     cy += 1;
 
     let tk = &f.ticker;
     if tk.ok {
-        let mut cx = g.text(ix, cy, "USD", t.label);
-        cx = g.text(cx + 1, cy, &format!("{:.1}", tk.usd_krw), t.bright);
-        cx = g.text(cx + 3, cy, "BTC", t.label);
-        cx = g.text(cx + 1, cy, &format!("{:.1}M", tk.btc_krw / 1e6), t.bright);
-        let up = tk.btc_chg_pct >= 0.0;
-        g.text(
-            cx + 1,
-            cy,
-            &format!("{}{:.1}%", if up { '▲' } else { '▼' }, tk.btc_chg_pct.abs()),
-            if up { t.ok } else { t.crit },
-        );
-    } else {
+        let mut cx = ix;
+        if !tk.fx_code.is_empty() {
+            cx = g.text(cx, cy, &format!("USD/{}", tk.fx_code), t.label);
+            cx = g.text(cx + 1, cy, &fmt_price(tk.fx_rate), t.bright) + 3;
+        }
+        if !tk.coin_market.is_empty() {
+            let base = tk.coin_market.split('-').nth(1).unwrap_or(&tk.coin_market);
+            cx = g.text(cx, cy, base, t.label);
+            cx = g.text(cx + 1, cy, &fmt_price(tk.coin_price), t.bright);
+            let up = tk.coin_chg_pct >= 0.0;
+            g.text(
+                cx + 1,
+                cy,
+                &format!("{}{:.1}%", if up { '▲' } else { '▼' }, tk.coin_chg_pct.abs()),
+                if up { t.ok } else { t.crit },
+            );
+        }
+    } else if !(crate::config::ticker().0.is_empty() && crate::config::ticker().1.is_empty()) {
         g.text(ix, cy, "ticker — fetching…", t.frame);
     }
     cy += 1;
@@ -855,6 +874,61 @@ fn panel_focus(g: &mut Grid, t: &Theme, f: &crate::feeds::Feeds, x: usize, y: us
 
 // ── right: tools ──────────────────────────────────────────────────────────
 
+/// Today's anomaly digest — what the day log has accumulated: warn/err
+/// events and spike excursions folded by subject, ActivityWatch-style. Click
+/// opens the raw log file for the full trace.
+fn panel_daylog(
+    g: &mut Grid,
+    t: &Theme,
+    x: usize,
+    y: usize,
+    w: usize,
+    h: usize,
+    ui: &UiState,
+    regions: &mut Regions,
+) {
+    g.panel(x, y, w, h, "day · anomalies", t.frame, t.warn);
+    let ix = x + 2;
+    let rows = h.saturating_sub(2);
+    let lines = crate::daylog::lines(rows);
+    regions.add(RegionId::DayLog, x + 1, y + 1, w - 2, rows.max(1), 0);
+    let hovered = ui.hovered_in(x + 1, y + 1, w - 2, rows.max(1)).is_some();
+
+    if lines.is_empty() {
+        g.text(ix, y + 1, "(quiet day so far)", t.frame);
+        return;
+    }
+    for (i, line) in lines.iter().enumerate() {
+        let cy = y + 1 + i;
+        match line {
+            crate::daylog::Line::Event(e) => {
+                let c = kind_color(t, e.kind);
+                g.put(ix, cy, if e.kind == events::Kind::Err { '✕' } else { '▲' }, c);
+                let cx = g.text_clip_end(ix + 2, cy, &e.text, (x + w).saturating_sub(12), if hovered { t.bright } else { t.fg });
+                if e.count > 1 {
+                    g.text(cx + 1, cy, &format!("×{}", e.count), c);
+                }
+                g.text_right(x + w - 2, cy, &e.last_hms[..5.min(e.last_hms.len())], t.frame);
+            }
+            crate::daylog::Line::Spike(s) => {
+                g.text(ix, cy, &format!("{:<3}", s.metric), metric_color(t, &s.metric));
+                let name_end = ix + 4 + (w / 2).saturating_sub(6);
+                let cx = g.text_clip_end(ix + 4, cy, &s.name, name_end, if hovered { t.bright } else { t.fg });
+                if s.count > 1 {
+                    g.text(cx + 1, cy, &format!("×{}", s.count), t.label);
+                }
+                g.text_right(
+                    x + w - 2,
+                    cy,
+                    &format!("pk {} · {}", s.peak_txt, fmt_duration_short(s.total_secs)),
+                    t.label,
+                );
+            }
+        }
+    }
+}
+
+#[allow(dead_code)]
 fn panel_launcher(
     g: &mut Grid,
     t: &Theme,
@@ -1091,6 +1165,20 @@ fn footer(g: &mut Grid, t: &Theme, s: &Snapshot, y: usize, frame: u64) {
 
     let spin = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
     g.put(g.cols.saturating_sub(2), y, spin[(frame as usize) % spin.len()], t.ok);
+}
+
+/// Prices across very different magnitudes in a fixed-ish width: 1382.5,
+/// 84.8K, 142.3M.
+fn fmt_price(v: f64) -> String {
+    if v >= 1e6 {
+        format!("{:.1}M", v / 1e6)
+    } else if v >= 1e4 {
+        format!("{:.1}K", v / 1e3)
+    } else if v >= 100.0 {
+        format!("{:.1}", v)
+    } else {
+        format!("{:.3}", v)
+    }
 }
 
 fn fmt_duration_short(secs: u64) -> String {

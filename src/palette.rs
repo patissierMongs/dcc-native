@@ -7,6 +7,7 @@
 //!
 //!   - launcher entries filter as you type
 //!   - `+text` appends to TODO.md
+//!   - `config`, `todo`, `log`, `data` open DCC's own files
 //!   - `http…` opens as a URL
 //!   - anything else is also sent to Everything (if its window exists) for
 //!     instant file search, replies arriving over WM_COPYDATA
@@ -37,7 +38,20 @@ const EV_REPLY: usize = 0xDCC0;
 #[derive(Clone)]
 enum Action {
     Open(String),
+    /// A text file DCC owns — opened in Notepad, since `.conf` rarely has an
+    /// association and a file-picker dialog is not an answer.
+    Edit(String),
     AddTodo(String),
+}
+
+/// DCC's own files, reachable by keyword. (keywords, label, target, is_text)
+fn builtins() -> [(&'static [&'static str], &'static str, String, bool); 4] {
+    [
+        (&["config", "settings", "설정"], "edit dcc.conf", crate::config::path().to_string_lossy().into_owned(), true),
+        (&["todo", "할일"], "edit TODO.md", crate::todo::path().to_string_lossy().into_owned(), true),
+        (&["log", "로그"], "today's day log", crate::daylog::path_today().to_string_lossy().into_owned(), true),
+        (&["data", "folder", "폴더"], "open the data folder", crate::paths::data_dir().to_string_lossy().into_owned(), false),
+    ]
 }
 
 #[derive(Clone)]
@@ -79,7 +93,7 @@ fn rebuild_results() {
     if let Some(text) = q.strip_prefix('+') {
         if !text.trim().is_empty() {
             items.push(Item {
-                label: format!("todo 추가: {}", text.trim()),
+                label: format!("+ todo: {}", text.trim()),
                 hint: "TODO.md".into(),
                 action: Action::AddTodo(text.trim().to_string()),
             });
@@ -87,6 +101,17 @@ fn rebuild_results() {
     } else {
         if q.starts_with("http://") || q.starts_with("https://") {
             items.push(Item { label: q.clone(), hint: "open url".into(), action: Action::Open(q.clone()) });
+        }
+        if ql.chars().count() >= 2 {
+            for (keys, label, target, text) in builtins() {
+                if keys.iter().any(|k| k.starts_with(ql.as_str())) {
+                    items.push(Item {
+                        label: label.to_string(),
+                        hint: "dcc".into(),
+                        action: if text { Action::Edit(target) } else { Action::Open(target) },
+                    });
+                }
+            }
         }
         for it in crate::config::launcher() {
             if ql.is_empty() || it.label.to_lowercase().contains(&ql) {
@@ -209,6 +234,7 @@ fn execute(hwnd: HWND) {
             crate::events::journal(crate::events::Kind::Info, &format!("palette: open {}", target));
             super::launch(&target, "");
         }
+        Some(Action::Edit(path)) => super::launch("notepad.exe", &format!("\"{}\"", path)),
         Some(Action::AddTodo(text)) => crate::todo::add(&text),
         None => {}
     }
@@ -384,7 +410,7 @@ pub fn paint(t: &Theme) {
             g.hline(1, 2, cols - 2, '╌', t.frame);
             if st.items.is_empty() {
                 let hint = if st.everything_seen || st.query.is_empty() {
-                    "type to search · +text adds todo · esc closes"
+                    "type to search · +text adds todo · config edits settings"
                 } else {
                     "everything not running — launcher + todo only"
                 };

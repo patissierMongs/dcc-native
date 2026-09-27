@@ -141,6 +141,16 @@ pub fn poll(hwnd: HWND) {
     }
 }
 
+/// Canned history for `--shot --demo`.
+pub fn set_demo(texts: &[&str]) {
+    if let Ok(mut items) = ITEMS.lock() {
+        items.clear();
+        for t in texts {
+            items.push_back(Clip { preview: preview_of(t), full: t.to_string() });
+        }
+    }
+}
+
 pub fn items() -> Vec<Clip> {
     ITEMS.lock().map(|i| i.iter().cloned().collect()).unwrap_or_default()
 }

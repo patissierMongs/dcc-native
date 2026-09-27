@@ -286,8 +286,6 @@ pub fn spawn() {
                 cache_write: cw,
                 sparkline,
                 top_model,
-                session_project: sessions.first().map(|s| s.project.clone()).unwrap_or_default(),
-                session_idle_secs: sessions.first().map(|s| s.idle_secs).unwrap_or(u64::MAX / 2),
                 sessions,
             };
             if !announced && out.ok {

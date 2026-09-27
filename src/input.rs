@@ -38,12 +38,12 @@ pub fn drain() -> Vec<Raw> {
 /// What a panel painted somewhere on the grid and wants events for.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum RegionId {
-    /// The by-cpu process rows — wheel scrolls the list.
-    ProcList,
     /// The journal panel — wheel scrolls history, click opens the action.
     Journal,
     /// Launcher tiles — click runs the configured target.
     Launcher,
+    /// The day digest — click opens today's log file.
+    DayLog,
     /// Clipboard history rows — click puts the entry back on the clipboard.
     ClipList,
     /// Headline rows — click opens the article.
@@ -92,8 +92,6 @@ impl Regions {
 pub struct UiState {
     /// Grid cell currently under the cursor, None when it left the window.
     pub hover: Option<(usize, usize)>,
-    /// First visible index into the by-cpu process list.
-    pub proc_scroll: usize,
     /// How many lines back from the journal tail the view is scrolled.
     pub journal_scroll: usize,
 }

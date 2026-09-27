@@ -222,7 +222,8 @@ impl Painter {
 
 pub struct Renderer {
     d2d: ID2D1Factory,
-    pub dwrite: IDWriteFactory,
+    /// Kept for the renderer's lifetime alongside the formats it made.
+    _dwrite: IDWriteFactory,
     pub painter: Painter,
     target: Option<ID2D1HwndRenderTarget>,
     hwnd: HWND,
@@ -264,7 +265,7 @@ impl Renderer {
             let painter = Painter::fitted(&dwrite, font, size.0 as f32, target_cols)?;
             let mut me = Renderer {
                 d2d,
-                dwrite,
+                _dwrite: dwrite,
                 painter,
                 target: None,
                 hwnd,

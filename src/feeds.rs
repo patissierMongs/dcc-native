@@ -1,4 +1,5 @@
-//! The network worker: weather, FX, BTC, headlines, calendar.
+//! The network worker: weather, FX, a crypto ticker, headlines, calendar and
+//! the local ActivityWatch server.
 //!
 //! One thread, one-minute heartbeat, per-feed refresh intervals. Every parser
 //! here is a hand-rolled scanner over a known payload — the JSON "parsing" is
@@ -24,9 +25,14 @@ pub struct Weather {
 #[derive(Clone, Default)]
 pub struct Ticker {
     pub ok: bool,
-    pub usd_krw: f64,
-    pub btc_krw: f64,
-    pub btc_chg_pct: f64,
+    /// USD quoted in `fx_code` (e.g. KRW per USD).
+    pub fx_code: String,
+    pub fx_rate: f64,
+    /// Upbit market, e.g. "KRW-BTC": price in the quote currency and the
+    /// signed 24h change.
+    pub coin_market: String,
+    pub coin_price: f64,
+    pub coin_chg_pct: f64,
 }
 
 #[derive(Clone)]
@@ -77,7 +83,14 @@ static FEEDS: Mutex<Feeds> = Mutex::new(Feeds {
         tmin: 0.0,
         tmax: 0.0,
     },
-    ticker: Ticker { ok: false, usd_krw: 0.0, btc_krw: 0.0, btc_chg_pct: 0.0 },
+    ticker: Ticker {
+        ok: false,
+        fx_code: String::new(),
+        fx_rate: 0.0,
+        coin_market: String::new(),
+        coin_price: 0.0,
+        coin_chg_pct: 0.0,
+    },
     news: Vec::new(),
     cal: Vec::new(),
     cal_configured: false,
@@ -86,6 +99,14 @@ static FEEDS: Mutex<Feeds> = Mutex::new(Feeds {
 
 pub fn get() -> Feeds {
     FEEDS.lock().map(|f| f.clone()).unwrap_or_default()
+}
+
+/// Replace everything with canned data — `--shot --demo` renders screenshots
+/// that show every panel populated without touching the network.
+pub fn set_demo(f: Feeds) {
+    if let Ok(mut g) = FEEDS.lock() {
+        *g = f;
+    }
 }
 
 // ── tiny scanners ─────────────────────────────────────────────────────────
@@ -190,13 +211,23 @@ fn weather_desc(code: f64) -> &'static str {
     }
 }
 
-const WEATHER_URL: &str = "https://api.open-meteo.com/v1/forecast?latitude=37.5665&longitude=126.978&current=temperature_2m,weather_code,wind_speed_10m&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max&wind_speed_unit=ms&timezone=Asia%2FSeoul&forecast_days=1";
-
 fn fetch_weather() {
-    let Some(body) = crate::http::get(WEATHER_URL) else { return };
-    let Some(temp) = num_after(&body, "temperature_2m") else { return };
-    let code = num_after(&body, "weather_code").unwrap_or(-1.0);
-    let wind = num_after(&body, "wind_speed_10m").unwrap_or(0.0);
+    let (_, lat, lon) = crate::config::weather();
+    // timezone=auto: the daily min/max follow the location's own midnight.
+    let url = format!(
+        "https://api.open-meteo.com/v1/forecast?latitude={:.4}&longitude={:.4}\
+         &current=temperature_2m,weather_code,wind_speed_10m\
+         &daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max\
+         &wind_speed_unit=ms&timezone=auto&forecast_days=1",
+        lat, lon
+    );
+    let Some(body) = crate::http::get(&url) else { return };
+    // The payload lists `current_units` ("temperature_2m":"°C") before
+    // `current` — scan from the values block, not the first key match.
+    let cur = body.find("\"current\":{").map(|i| &body[i..]).unwrap_or(&body);
+    let Some(temp) = num_after(cur, "temperature_2m") else { return };
+    let code = num_after(cur, "weather_code").unwrap_or(-1.0);
+    let wind = num_after(cur, "wind_speed_10m").unwrap_or(0.0);
     let tmax = first_in_array(&body, "temperature_2m_max").unwrap_or(0.0);
     let tmin = first_in_array(&body, "temperature_2m_min").unwrap_or(0.0);
     let pop = first_in_array(&body, "precipitation_probability_max").unwrap_or(0.0);
@@ -216,23 +247,38 @@ fn fetch_weather() {
 // ── ticker ────────────────────────────────────────────────────────────────
 
 fn fetch_fx() {
+    let (code, _) = crate::config::ticker();
+    if code.is_empty() || code == "USD" {
+        if let Ok(mut f) = FEEDS.lock() {
+            f.ticker.fx_code.clear();
+        }
+        return;
+    }
     let Some(body) = crate::http::get("https://open.er-api.com/v6/latest/USD") else { return };
-    let Some(krw) = num_after(&body, "KRW") else { return };
+    let Some(rate) = num_after(&body, &code) else { return };
     if let Ok(mut f) = FEEDS.lock() {
-        f.ticker.usd_krw = krw;
+        f.ticker.fx_code = code;
+        f.ticker.fx_rate = rate;
         f.ticker.ok = true;
     }
 }
 
-fn fetch_btc() {
-    let Some(body) = crate::http::get("https://api.upbit.com/v1/ticker?markets=KRW-BTC") else {
+fn fetch_coin() {
+    let (_, market) = crate::config::ticker();
+    if market.is_empty() {
+        if let Ok(mut f) = FEEDS.lock() {
+            f.ticker.coin_market.clear();
+        }
         return;
-    };
+    }
+    let url = format!("https://api.upbit.com/v1/ticker?markets={}", market);
+    let Some(body) = crate::http::get(&url) else { return };
     let Some(price) = num_after(&body, "trade_price") else { return };
     let chg = num_after(&body, "signed_change_rate").unwrap_or(0.0) * 100.0;
     if let Ok(mut f) = FEEDS.lock() {
-        f.ticker.btc_krw = price;
-        f.ticker.btc_chg_pct = chg;
+        f.ticker.coin_market = market;
+        f.ticker.coin_price = price;
+        f.ticker.coin_chg_pct = chg;
         f.ticker.ok = true;
     }
 }
@@ -463,7 +509,7 @@ fn str_after_local(hay: &str, key: &str) -> Option<String> {
 pub fn prefetch() {
     fetch_weather();
     fetch_fx();
-    fetch_btc();
+    fetch_coin();
     fetch_news();
     fetch_calendar();
     fetch_aw();
@@ -472,9 +518,9 @@ pub fn prefetch() {
 pub fn spawn() {
     std::thread::spawn(|| {
         let t0 = Instant::now() - Duration::from_secs(3600);
-        let mut last = [t0; 6]; // weather, fx, btc, news, cal, aw
+        let mut last = [t0; 6]; // weather, fx, coin, news, cal, aw
         let every = [600u64, 1800, 300, 600, 900, 120];
-        let jobs: [fn(); 6] = [fetch_weather, fetch_fx, fetch_btc, fetch_news, fetch_calendar, fetch_aw];
+        let jobs: [fn(); 6] = [fetch_weather, fetch_fx, fetch_coin, fetch_news, fetch_calendar, fetch_aw];
         loop {
             for i in 0..jobs.len() {
                 if last[i].elapsed().as_secs() >= every[i] {

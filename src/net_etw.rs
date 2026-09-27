@@ -77,16 +77,23 @@ unsafe extern "system" fn on_event(rec: *mut EVENT_RECORD) {
     }
 }
 
-pub fn spawn() {
-    std::thread::spawn(|| unsafe {
-        // Stop any session a crashed previous run left behind.
-        let (mut stale, name_w) = make_props();
+/// Stop the kernel session by name. Sessions outlive their creator, so this
+/// runs both before starting (a crashed run's leftovers) and on a clean quit.
+pub fn stop() {
+    unsafe {
+        let (mut props, name_w) = make_props();
         let _ = ControlTraceW(
             CONTROLTRACE_HANDLE::default(),
             PCWSTR(name_w.as_ptr()),
-            stale.as_mut_ptr() as *mut EVENT_TRACE_PROPERTIES,
+            props.as_mut_ptr() as *mut EVENT_TRACE_PROPERTIES,
             EVENT_TRACE_CONTROL_STOP,
         );
+    }
+}
+
+pub fn spawn() {
+    std::thread::spawn(|| unsafe {
+        stop();
 
         let (mut props, name_w) = make_props();
         let mut handle = CONTROLTRACE_HANDLE::default();

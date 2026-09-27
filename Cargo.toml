@@ -1,7 +1,13 @@
 [package]
 name = "dcc"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
+description = "DevOps Command Center: a live, clickable terminal-style dashboard that replaces the Windows desktop wallpaper"
+license = "MIT"
+repository = "https://github.com/patissierMongs/dcc-native"
+readme = "README.md"
+keywords = ["wallpaper", "dashboard", "windows", "monitoring", "desktop"]
+publish = false
 
 [dependencies]
 windows-core = "0.62"

@@ -61,8 +61,16 @@ fn zone_at((cx, cy): (usize, usize)) -> Option<u8> {
         .map(|(_, _, _, _, z)| *z)
 }
 
-/// Where the Google Drive mirror lives, if anywhere.
+/// Where the "drive" zone copies to: `[drop] drive = …` in dcc.conf, else
+/// the usual Google Drive for Desktop mirror locations.
 fn drive_dir() -> Option<PathBuf> {
+    if let Some(p) = crate::config::drive() {
+        let p = PathBuf::from(p.replace("%USERPROFILE%", &std::env::var("USERPROFILE").unwrap_or_default()));
+        let _ = std::fs::create_dir_all(&p);
+        if p.is_dir() {
+            return Some(p);
+        }
+    }
     let mut candidates: Vec<PathBuf> = vec![
         PathBuf::from("G:\\내 드라이브"),
         PathBuf::from("G:\\My Drive"),

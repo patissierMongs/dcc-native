@@ -64,6 +64,15 @@ pub fn tick() {
     }
 }
 
+/// Freeze a running session `frac` of the way through, for `--shot --demo`.
+pub fn set_demo(frac: f64) {
+    if let Ok(mut p) = STATE.lock() {
+        let left = WORK.mul_f64((1.0 - frac).clamp(0.0, 1.0));
+        p.deadline = Some(Instant::now() + left);
+        p.remaining = left;
+    }
+}
+
 /// (mm:ss, fraction elapsed, running) for the panel.
 pub fn status() -> (String, f64, bool) {
     let Ok(p) = STATE.lock() else { return ("--:--".into(), 0.0, false) };

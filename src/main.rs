@@ -1,12 +1,15 @@
 // No console window: this is a wallpaper, not a command. Startup diagnostics
-// go to dcc.log next to the executable.
+// go to dcc.log in the data folder (%LOCALAPPDATA%\dcc).
 #![windows_subsystem = "windows"]
 
 mod bigtext;
 mod claude;
+mod cli;
 mod clipboard;
 mod collect;
 mod config;
+mod daylog;
+mod demo;
 mod desktop;
 mod drop;
 mod eventlog;
@@ -23,6 +26,7 @@ mod input;
 mod monitors;
 mod net_etw;
 mod palette;
+mod paths;
 mod ping;
 mod pomo;
 mod probe;
@@ -137,6 +141,11 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) ->
             palette::toggle(FONT);
             LRESULT(0)
         }
+        // `dcc --stop` / `--install` / `--uninstall` asking us to leave.
+        _ if msg == cli::WM_DCC_QUIT => {
+            let _ = DestroyWindow(hwnd);
+            LRESULT(0)
+        }
         // Wheel coordinates are in screen space, unlike every other mouse
         // message — convert before queueing.
         WM_MOUSEWHEEL => {
@@ -182,10 +191,7 @@ fn target_rect(which: Option<usize>, all: bool, as_child: bool) -> (i32, i32, i3
 /// Diagnostics go to a file — there is no console to print to.
 fn log_line(msg: &str) {
     use std::io::Write;
-    let path = std::env::current_exe()
-        .map(|p| p.with_file_name("dcc.log"))
-        .unwrap_or_else(|_| "dcc.log".into());
-    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(paths::file("dcc.log")) {
         let (_, mo, d, h, mi, s) = collect::local_time();
         let _ = writeln!(f, "{:02}-{:02} {:02}:{:02}:{:02}  {}", mo, d, h, mi, s, msg);
     }
@@ -195,9 +201,7 @@ fn log_line(msg: &str) {
 /// `--restore-icons` can put back what was actually there. Written once — a
 /// second run must not overwrite the true original with our own CLR_NONE.
 fn iconbg_path() -> std::path::PathBuf {
-    std::env::current_exe()
-        .map(|p| p.with_file_name("dcc-iconbg.txt"))
-        .unwrap_or_else(|_| "dcc-iconbg.txt".into())
+    paths::file("dcc-iconbg.txt")
 }
 
 fn save_iconbg_once(colour: isize) {
@@ -263,10 +267,34 @@ fn stub_side_panels(s: &mut Snapshot) {
 }
 
 fn main() -> Result<()> {
-    // `dcc --shot out.png [w h]` renders one frame offscreen and exits, using
-    // the same painter as the live window — a faithful preview that does not
-    // disturb whatever is on screen.
     let args: Vec<String> = std::env::args().collect();
+    let has = |flag: &str| args.iter().any(|a| a == flag);
+
+    // One-shot commands answer with a message box and exit.
+    if has("--help") || has("-h") || has("/?") {
+        cli::help();
+        return Ok(());
+    }
+    if has("--install") {
+        cli::install(&args);
+        return Ok(());
+    }
+    if has("--uninstall") {
+        cli::uninstall();
+        return Ok(());
+    }
+    if has("--stop") {
+        cli::stop_running();
+        return Ok(());
+    }
+
+    // Settings and logs live in %LOCALAPPDATA%\dcc; older builds kept them
+    // next to the executable.
+    let migrated = paths::migrate_legacy();
+    paths::rotate_log();
+    if !migrated.is_empty() {
+        log_line(&format!("migrated to {}: {}", paths::data_dir().display(), migrated.join(", ")));
+    }
 
     // Undo the icon-list tweak without starting the wallpaper.
     if args.iter().any(|a| a == "--restore-icons") {
@@ -289,11 +317,29 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
+    // `dcc --shot out.png [w h] [--demo]` renders one frame offscreen and
+    // exits, using the same painter as the live window — a faithful preview
+    // that does not disturb whatever is on screen. `--demo` swaps every data
+    // source for canned values: screenshots without the machine's own data.
     if args.get(1).map(|s| s.as_str()) == Some("--shot") {
         let path = args.get(2).cloned().unwrap_or_else(|| "shot.png".into());
         let w: u32 = args.get(3).and_then(|s| s.parse().ok()).unwrap_or(2560);
         let h: u32 = args.get(4).and_then(|s| s.parse().ok()).unwrap_or(1080);
         let th = theme::PHOSPHOR;
+
+        if has("--demo") {
+            let mut snap = demo::snapshot();
+            stamp_clock(&mut snap);
+            demo::seed();
+            let ui_state = input::UiState::default();
+            let mut regions = input::Regions::default();
+            let frame = snap.agent_uptime_secs;
+            return gfx::render_png(&path, (w, h), FONT, TARGET_COLS, th.bg, &mut |cols, rows| {
+                let mut g = Grid::new(cols, rows, th.fg);
+                ui::render(&mut g, &th, &snap, frame, &ui_state, &mut regions);
+                g
+            });
+        }
 
         // Several passes so the CPU deltas are real and the sparklines have
         // something in them.
@@ -312,6 +358,8 @@ fn main() -> Result<()> {
         // the shot doubles as an end-to-end test of every fetcher.
         config::load();
         feeds::prefetch();
+        // Read-only: the shot shows the real day digest but never writes it.
+        let _ = daylog::init(false);
         events::journal(events::Kind::Ok, "dcc online — offscreen preview");
         events::journal(events::Kind::Info, "한글 렌더링 테스트 — 전각 2칸 정렬 확인");
         events::post(events::Kind::Ok, "preview", "toast + journal wired");
@@ -413,6 +461,9 @@ fn main() -> Result<()> {
             None,
         )?;
 
+        // Let `dcc --stop` (possibly unelevated) reach an elevated wallpaper.
+        let _ = ChangeWindowMessageFilterEx(hwnd, cli::WM_DCC_QUIT, MSGFLT_ALLOW, None);
+
         if windowed {
             let _ = ShowWindow(hwnd, SW_SHOW);
             log_line("mode: windowed");
@@ -476,7 +527,21 @@ fn main() -> Result<()> {
         ));
         let mut g = Grid::new(cols, rows, th.fg);
 
+        // Replay today's day log before anything writes to it, so the digest
+        // spans the whole day and nothing is counted twice.
+        let replayed = daylog::init(!windowed);
+        if replayed > 0 {
+            events::journal(events::Kind::Info, &format!("day log — {} entries replayed", replayed));
+        }
+
         events::post(events::Kind::Ok, "dcc online", &format!("grid {}x{} · {} cores", cols, rows, std::thread::available_parallelism().map(|n| n.get()).unwrap_or(0)));
+        if !migrated.is_empty() {
+            events::post(
+                events::Kind::Info,
+                "settings moved",
+                &format!("{} → {}", migrated.join(", "), paths::data_dir().display()),
+            );
+        }
 
         // Clipboard history feeds off WM_CLIPBOARDUPDATE; the watcher thread
         // covers Downloads and live dcc.conf reloads; the feed worker fetches
@@ -539,6 +604,9 @@ fn main() -> Result<()> {
 
             while PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).as_bool() {
                 if msg.message == WM_QUIT {
+                    // Kernel trace sessions outlive their creator.
+                    net_etw::stop();
+                    log_line("quit");
                     return Ok(());
                 }
                 let _ = TranslateMessage(&msg);
@@ -561,13 +629,6 @@ fn main() -> Result<()> {
                         let (cx, cy) = cell_of(x, y);
                         if let Some(r) = regions.hit(cx, cy) {
                             match r.id {
-                                input::RegionId::ProcList => {
-                                    // Wheel up shows earlier (hotter) rows.
-                                    let step = (-delta * 3) as isize;
-                                    let cur = ui_state.proc_scroll as isize;
-                                    ui_state.proc_scroll =
-                                        (cur + step).clamp(0, r.max_scroll as isize) as usize;
-                                }
                                 input::RegionId::Journal => {
                                     // Wheel up goes back through history.
                                     let step = (delta * 3) as isize;
@@ -594,6 +655,12 @@ fn main() -> Result<()> {
                                         );
                                     }
                                 }
+                                input::RegionId::DayLog => {
+                                    let p = daylog::path_today();
+                                    if p.exists() {
+                                        launch(&p.to_string_lossy(), "");
+                                    }
+                                }
                                 input::RegionId::ClipList => {
                                     if let Some(p) = clipboard::recopy(hwnd, row) {
                                         let short: String = p.chars().take(40).collect();
@@ -616,7 +683,6 @@ fn main() -> Result<()> {
                                 input::RegionId::Todo => {
                                     let _ = todo::toggle(row);
                                 }
-                                input::RegionId::ProcList => {}
                             }
                         }
                     }

@@ -3,7 +3,7 @@
 목표: 모니터링 벽지를 넘어, 아이콘·위젯·런처를 대체하는 **종합 인터랙티브 데스크톱 레이어**.
 
 범례: `[x]` 완료 · `[~]` 부분 완료/설정 필요 · `[ ]` 미착수
-(2026-08-18 기준. 설정 파일은 dcc.toml 대신 `dcc.conf` 라인 포맷으로 구현됨)
+(2026-09-27 기준. 설정 파일은 dcc.toml 대신 `dcc.conf` 라인 포맷으로 구현됨)
 
 ## Phase 0 — 기반 공사 ✅
 
@@ -18,7 +18,7 @@
 
 ## Phase 1 — 로컬 도구 ✅
 
-- [x] 런처 타일 (dcc.conf → 클릭 실행)
+- [x] 런처 (dcc.conf → 팔레트에서 실행; 벽면 패널 자리는 day · anomalies로 교체)
 - [x] 클립보드 히스토리 (재시도 큐, 클릭 재복사)
 - [x] 다운로드 감시 (완료 토스트, 저널 클릭 → 열기)
 - [x] GPU 패널 (nvml.dll 직접 로드 — 사용률/VRAM/온도/전력/그래프)
@@ -27,8 +27,8 @@
 
 ## Phase 2 — 피드 ✅
 
-- [x] 날씨 (Open-Meteo, 서울)
-- [x] 환율 USD/KRW + BTC (업비트, 등락률)
+- [x] 날씨 (Open-Meteo, 위치는 dcc.conf [weather] — 기본 서울)
+- [x] 환율 USD/xxx + 업비트 코인 하나 (dcc.conf [ticker], 등락률)
 - [x] 뉴스 — RSS/Atom 겸용 파서, 기본 Geek News, 클릭 → 브라우저
 - [~] 캘린더 ICS — 구현 완료, **비밀 iCal URL을 dcc.conf [calendar]에 붙여넣어야 표시됨**
 
@@ -65,13 +65,19 @@
 
 ## 운영/품질 (추가 완료)
 
-- [x] 관리자 권한 스케줄러 자동시작 (`DCC Wallpaper`, RL HIGHEST)
+- [x] 관리자 권한 스케줄러 자동시작 — `dcc --install / --uninstall / --stop` (실행 시간 제한 없음, 실패 시 재시작)
 - [x] OLED 보호 — 픽셀 시프트(5분 궤도) + 야간 감광(23-08, dcc.conf)
 - [x] soft 저채도 테마 옵션 (`theme = soft`, 라이브 전환)
 - [x] git 저장소 초기화 + 커밋 관리 시작
+- [x] 하루 로그(`logs\dcc-day-*.log`) + 오늘의 특이점 요약 패널 (재시작 시 리플레이)
+- [x] 설정·로그를 `%LOCALAPPDATA%\dcc`로 분리 (구버전 파일 자동 이전)
+- [x] 팔레트 내장 명령: config / todo / log / data
+- [x] `--shot --demo` 예시 데이터 렌더 (README 스크린샷)
+- [x] GitHub 공개 (README 영/한, MIT)
 
 ## 남은 것 / 다음 후보
 
+- [ ] 리디자인 방향 선택 후 렌더러 이식 (시안 A~E)
 - [ ] Google OAuth (일정 추가·Drive API 직접 업로드)
 - [ ] 커밋/세션 diff 토스트 + repo 행 클릭 액션
 - [ ] 디스크별 큐/busy (PDH PhysicalDisk) — sar -d

@@ -89,8 +89,6 @@ pub struct Claude {
     pub cache_write: u64,
     pub sparkline: Vec<f64>,
     pub top_model: String,
-    pub session_project: String,
-    pub session_idle_secs: u64,
     /// The Herd-style board: recent sessions, freshest first.
     pub sessions: Vec<ClaudeSession>,
 }
@@ -136,7 +134,6 @@ pub struct Snapshot {
     pub procs: Vec<Proc>,
     pub task_count: usize,
     pub thread_count: usize,
-    pub handle_count: usize,
     pub repos: Vec<Repo>,
     pub repos_scanned: usize,
     pub commits: Vec<Commit>,

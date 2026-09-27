@@ -1,19 +1,25 @@
 //! `dcc.conf` — one small hand-parsed file instead of a TOML dependency.
 //!
-//! The format is sections of pipe-separated lines:
+//! The format is sections of plain lines — pipe-separated for lists,
+//! `key = value` for settings:
 //!
 //! ```text
 //! [launcher]
 //! # label | target | optional args
-//! VS Code   | C:\Users\me\AppData\Local\Programs\Microsoft VS Code\Code.exe
-//! Downloads | C:\Users\me\Downloads
+//! VS Code   | code
+//! Downloads | shell:Downloads
 //! GitHub    | https://github.com
+//!
+//! [weather]
+//! city = Seoul
+//! lat  = 37.5665
+//! lon  = 126.978
 //! ```
 //!
-//! The file lives next to the executable, like dcc.log. A missing file is
-//! created with a commented template so there is something to edit. The watch
-//! thread re-reads it when the modification time changes — saving the file is
-//! all it takes to update the wallpaper.
+//! The file lives in the data folder (see `paths`). A missing file is created
+//! with a commented template so there is something to edit. The watch thread
+//! re-reads it when the modification time changes — saving the file is all
+//! it takes to update the wallpaper.
 
 use std::sync::Mutex;
 
@@ -39,67 +45,94 @@ pub struct Config {
     pub night_end: u32,
     /// "phosphor" (default) or "soft".
     pub theme: String,
+    /// Weather location: a label for the panel and coordinates for the API.
+    pub city: String,
+    pub lat: f64,
+    pub lon: f64,
+    /// Currency the USD rate is quoted in; "off" hides the rate.
+    pub currency: String,
+    /// One Upbit market (e.g. KRW-BTC, USDT-ETH); "off" hides it.
+    pub coin: String,
+    /// Where the drop panel's "drive" zone copies to (Google Drive mirror by
+    /// default, any synced folder works).
+    pub drive: Option<String>,
+}
+
+const fn defaults() -> Config {
+    Config {
+        launcher: Vec::new(),
+        rss: Vec::new(),
+        ics: None,
+        git_roots: Vec::new(),
+        pixel_shift: true,
+        night_dim: 0.55,
+        night_start: 23,
+        night_end: 8,
+        theme: String::new(),
+        city: String::new(),
+        lat: 37.5665,
+        lon: 126.978,
+        currency: String::new(),
+        coin: String::new(),
+        drive: None,
+    }
 }
 
 impl Default for Config {
     fn default() -> Self {
-        Config {
-            launcher: Vec::new(),
-            rss: Vec::new(),
-            ics: None,
-            git_roots: vec!["%USERPROFILE%\\Documents".into()],
-            pixel_shift: true,
-            night_dim: 0.55,
-            night_start: 23,
-            night_end: 8,
-            theme: "phosphor".into(),
-        }
+        defaults()
     }
 }
 
-static CONFIG: Mutex<Config> = Mutex::new(Config {
-    launcher: Vec::new(),
-    rss: Vec::new(),
-    ics: None,
-    git_roots: Vec::new(),
-    pixel_shift: true,
-    night_dim: 0.55,
-    night_start: 23,
-    night_end: 8,
-    theme: String::new(),
-});
+static CONFIG: Mutex<Config> = Mutex::new(defaults());
 
 pub fn path() -> std::path::PathBuf {
-    std::env::current_exe()
-        .map(|p| p.with_file_name("dcc.conf"))
-        .unwrap_or_else(|_| "dcc.conf".into())
+    crate::paths::file("dcc.conf")
 }
 
 const TEMPLATE: &str = "\
 # dcc.conf — saved changes apply live, no restart needed.
-#
-# [launcher] lines are:  label | target | optional args
-# target can be an exe, a folder, or a URL.
+# Open it any time from the palette: Ctrl+` then type 'config'.
 
+# [launcher]  label | target | optional args
+# target can be an exe, a folder, a URL or a shell: path. Entries show up
+# in the palette (Ctrl+`) and filter as you type.
 [launcher]
 Downloads   | shell:Downloads
 Documents   | shell:Personal
 Terminal    | wt.exe
 Task Mgr    | taskmgr.exe
 
-# [rss] one feed URL per line — headlines show in the news panel.
+# [rss] one RSS or Atom feed URL per line — headlines show in the news panel.
 [rss]
 https://news.hada.io/rss/news
 
 # [calendar] a single secret ICS address; today's events show in the day
-# panel. Google Calendar: settings > your calendar > 'Secret address in
-# iCal format'.
+# panel. Google Calendar: Settings > your calendar > 'Secret address in iCal
+# format'. Treat that address like a password.
 [calendar]
 # https://calendar.google.com/calendar/ical/....../basic.ics
+
+# [weather] location for the day panel (Open-Meteo, no API key needed).
+[weather]
+city = Seoul
+lat = 37.5665
+lon = 126.978
+
+# [ticker] currency = the USD exchange rate's quote currency (off to hide).
+# coin = one Upbit market such as KRW-BTC or USDT-ETH (off to hide).
+[ticker]
+currency = KRW
+coin = KRW-BTC
 
 # [git] roots to scan (two levels deep) for repositories.
 [git]
 %USERPROFILE%\\Documents
+
+# [drop] where the drop panel's 'drive' zone copies files. Leave commented
+# to auto-detect a Google Drive for Desktop mirror.
+[drop]
+# drive = G:\\My Drive\\Inbox
 
 # [display] OLED care. pixel_shift drifts the render a few px every 5 min;
 # night_dim darkens everything during night_hours (local, start-end).
@@ -123,6 +156,7 @@ fn parse(text: &str) -> Config {
             section = line[1..line.len() - 1].to_ascii_lowercase();
             continue;
         }
+        let kv = line.split_once('=').map(|(k, v)| (k.trim().to_ascii_lowercase(), v.trim()));
         match section.as_str() {
             "launcher" => {
                 let mut parts = line.splitn(3, '|').map(str::trim);
@@ -146,10 +180,27 @@ fn parse(text: &str) -> Config {
                     cfg.ics = Some(line.to_string());
                 }
             }
+            "weather" => match kv {
+                Some((k, v)) if k == "city" => cfg.city = v.to_string(),
+                Some((k, v)) if k == "lat" => cfg.lat = v.parse().unwrap_or(cfg.lat),
+                Some((k, v)) if k == "lon" => cfg.lon = v.parse().unwrap_or(cfg.lon),
+                _ => {}
+            },
+            "ticker" => match kv {
+                Some((k, v)) if k == "currency" => cfg.currency = v.to_ascii_uppercase(),
+                Some((k, v)) if k == "coin" => cfg.coin = v.to_ascii_uppercase(),
+                _ => {}
+            },
+            "drop" => {
+                if let Some((k, v)) = kv {
+                    if k == "drive" && !v.is_empty() {
+                        cfg.drive = Some(v.to_string());
+                    }
+                }
+            }
             "display" => {
-                if let Some((k, v)) = line.split_once('=') {
-                    let (k, v) = (k.trim(), v.trim());
-                    match k {
+                if let Some((k, v)) = kv {
+                    match k.as_str() {
                         "pixel_shift" => cfg.pixel_shift = v != "off" && v != "false" && v != "0",
                         "night_dim" => {
                             if let Ok(f) = v.parse::<f64>() {
@@ -200,6 +251,7 @@ pub fn ics() -> Option<String> {
     CONFIG.lock().ok().and_then(|c| c.ics.clone())
 }
 
+/// The configured roots, or Documents when the section is empty.
 pub fn git_roots() -> Vec<String> {
     let roots = CONFIG.lock().map(|c| c.git_roots.clone()).unwrap_or_default();
     if roots.is_empty() {
@@ -219,4 +271,39 @@ pub fn display() -> (bool, f64, u32, u32) {
 
 pub fn soft_theme() -> bool {
     CONFIG.lock().map(|c| c.theme == "soft").unwrap_or(false)
+}
+
+/// (label, lat, lon) — the label defaults to "Seoul" to match the default
+/// coordinates.
+pub fn weather() -> (String, f64, f64) {
+    CONFIG
+        .lock()
+        .map(|c| {
+            let city = if c.city.is_empty() { "Seoul".to_string() } else { c.city.clone() };
+            (city, c.lat, c.lon)
+        })
+        .unwrap_or_else(|_| ("Seoul".into(), 37.5665, 126.978))
+}
+
+/// (quote currency for USD, Upbit market) — empty string means hidden.
+pub fn ticker() -> (String, String) {
+    let (cur, coin) = CONFIG
+        .lock()
+        .map(|c| (c.currency.clone(), c.coin.clone()))
+        .unwrap_or_default();
+    let cur = match cur.as_str() {
+        "" => "KRW".to_string(),
+        "OFF" => String::new(),
+        _ => cur,
+    };
+    let coin = match coin.as_str() {
+        "" => "KRW-BTC".to_string(),
+        "OFF" => String::new(),
+        _ => coin,
+    };
+    (cur, coin)
+}
+
+pub fn drive() -> Option<String> {
+    CONFIG.lock().ok().and_then(|c| c.drive.clone())
 }

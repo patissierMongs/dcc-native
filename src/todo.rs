@@ -19,12 +19,9 @@ static STATE: Mutex<State> = Mutex::new(State { lines: Vec::new(), items: Vec::n
 const TEMPLATE: &str = "\
 # TODO
 
-- [x] 전각 렌더링
-- [x] 피드 워커
-- [x] git 수집기
-- [x] claude 수집기
-- [ ] 검색 팔레트 다듬기
-- [ ] 드롭존 · 구글드라이브
+- [x] install DCC
+- [ ] press Ctrl+` and type +water the plants
+- [ ] set your city in dcc.conf (Ctrl+` → config)
 ";
 
 pub fn path() -> PathBuf {
@@ -98,6 +95,15 @@ pub fn toggle(display_row: usize) -> bool {
         true
     } else {
         false
+    }
+}
+
+/// Canned rows for `--shot --demo`; nothing touches the real file.
+pub fn set_demo(rows: &[(bool, &str)]) {
+    if let Ok(mut st) = STATE.lock() {
+        st.lines = rows.iter().map(|(d, t)| format!("- [{}] {}", if *d { 'x' } else { ' ' }, t)).collect();
+        st.items = rows.iter().enumerate().map(|(i, (d, t))| (i, *d, t.to_string())).collect();
+        st.mtime = Some(std::time::SystemTime::now());
     }
 }
 

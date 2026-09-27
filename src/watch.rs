@@ -15,9 +15,7 @@ use crate::events;
 const TEMP_EXT: [&str; 5] = ["crdownload", "tmp", "part", "partial", "download"];
 
 fn downloads_dir() -> Option<PathBuf> {
-    let profile = std::env::var_os("USERPROFILE")?;
-    let p = PathBuf::from(profile).join("Downloads");
-    p.is_dir().then_some(p)
+    crate::paths::downloads().filter(|p| p.is_dir())
 }
 
 fn is_temp(p: &PathBuf) -> bool {

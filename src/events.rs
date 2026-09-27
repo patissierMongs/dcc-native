@@ -53,7 +53,9 @@ fn hms() -> String {
 }
 
 fn push_entry(bus: &mut Bus, kind: Kind, text: String, action: Option<String>) {
-    bus.journal.push_back(Entry { hms: hms(), kind, text, action });
+    let hms = hms();
+    crate::daylog::event(kind, &hms, &text);
+    bus.journal.push_back(Entry { hms, kind, text, action });
     while bus.journal.len() > JOURNAL_CAP {
         bus.journal.pop_front();
     }

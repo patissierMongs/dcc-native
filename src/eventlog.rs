@@ -5,7 +5,6 @@
 //! toast + journal line with the interesting fields pulled from the XML.
 
 use windows::core::*;
-use windows::Win32::Foundation::*;
 use windows::Win32::System::EventLog::*;
 
 use crate::events;
@@ -102,8 +101,8 @@ fn subscribe(channel: PCWSTR, query: PCWSTR) {
             Some(on_event),
             EvtSubscribeToFutureEvents.0,
         ) {
-            // Handles live as long as the wallpaper does.
-            std::mem::forget(h);
+            // Never closed: the subscription lives as long as the wallpaper.
+            let _ = h;
         }
     }
 }
